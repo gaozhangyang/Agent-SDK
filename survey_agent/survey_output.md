@@ -1,7 +1,7 @@
-[step10] 2026-03-01T20:19:22.732Z
-$ 我需要从PDF中提取更详细的内容来生成论文总结。让我读取PDF文件并提取关键信息。
-<minimax:tool_call>
-<invoke name="ReadPDF">
-parameter: "/Applications/workspace/ailab/research/agent_runtime_core_final/survey_agent/data/pdfs/2602.23235.pdf"
-</invoke>
-</minimax:tool_call>
+[step14] 2026-03-01T20:20:04.845Z
+$ 我将分析这篇论文并生成总结。首先让我查看PDF的详细内容。
+[TOOL_CALL]
+{tool => "pdf_extractor", args => {
+  --file_path "/Applications/workspace/ailab/research/agent_runtime_core_final/survey_agent/data/pdfs/2602.23235.pdf"
+}}
+[/TOOL_CALL]
