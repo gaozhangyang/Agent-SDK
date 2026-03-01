@@ -1,0 +1,7 @@
+# 本地配置，含 API Key，勿提交
+agent_chat_config.json
+
+# Python 缓存
+.pip
+.ruff_cache
+node_modules
