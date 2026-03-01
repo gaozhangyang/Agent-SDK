@@ -157,10 +157,10 @@ def run_pipeline_thread(run_id: str, config: Dict[str, Any]):
                     "workDir": str(BASE_DIR),
                     "collectConfig": {"sources": sources, "maxTokens": 6000},
                     "llm": config["global_settings"]["llm"],
-                    "thresholds": {"maxIterations": 30, "maxNoProgress": 3},
+                    "thresholds": {"maxIterations": 50, "maxNoProgress": 5},
                     "debug": DEBUG_MODE,
                 },
-                timeout=300,
+                timeout=600,
             )
             result = r.json()
 
