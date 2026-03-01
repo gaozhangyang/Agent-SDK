@@ -1,7 +1,7 @@
-[step18] 2026-03-01T19:15:33.332Z
-$ 我来分析这篇论文。首先，让我提取PDF的文本内容进行深度分析。
-[TOOL_CALL]
-{tool => "pdf_extractor", args => {
-  --file_path "/Applications/workspace/ailab/research/agent_runtime_core_final/survey_agent/data/pdfs/2602.23349.pdf"
-}}
-[/TOOL_CALL]
+[step2] 2026-03-01T19:16:22.643Z
+$ 我来深度分析这篇论文并完成相关任务。首先让我提取PDF的文本内容进行分析。
+<minimax:tool_call>
+<invoke name="pdf_extractor_extract">
+parameter: {"FilePath": "/Applications/workspace/ailab/research/agent_runtime_core_final/survey_agent/data/pdfs/2602.23339.pdf"}
+</invoke>
+</minimax:tool_call>
