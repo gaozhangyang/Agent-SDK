@@ -47,8 +47,8 @@ class TestArxivPDFDownload(unittest.TestCase):
     def test_download_pdf_success(self):
         """测试成功下载 arXiv PDF"""
         # 使用一个已知的 arXiv ID 进行测试
-        # 2504.19064 是一个真实的 arXiv 论文
-        test_arxiv_id = "2504.19064"
+        # 2602.23360 是一个真实的 arXiv 论文
+        test_arxiv_id = "2602.23360"
         output_path = os.path.join(self.temp_dir, f"{test_arxiv_id}.pdf")
         
         print(f"\n[Test] Downloading arXiv paper: {test_arxiv_id}")
