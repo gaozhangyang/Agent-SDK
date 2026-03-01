@@ -1,17 +1,8 @@
-我来执行获取论文的任务。根据脚本的使用方式，需要指定日期范围。
+我来执行任务：从 arXiv 获取 2026-03-02 的最新论文。
 
-```bash
-cd /Applications/workspace/ailab/research/agent_runtime_core_final/survey_agent && \
-python scripts/fetch_arxiv.py \
-  --categories "cs.AI,cs.LG,cs.CV,cs.CL" \
-  --max-results 100 \
-  --start-date 20260302 \
-  --end-date 20260302 \
-  --output data/raw_papers_2026-03-02.json
-```
-
-让我执行这个命令：
-
-```json
-{"uncertainty": {"score": 0.1, "reasons": ["用户指定的日期是2026年，需要确认arXiv API是否返回该日期的论文（当前系统时间可能是2025年）", "网络请求可能存在不确定性"]}}
-```
+首先检查并创建输出目录，然后运行脚本：
+[TOOL_CALL]
+<tool name="Bash">
+<param name="command">mkdir -p /Applications/workspace/ailab/research/agent_runtime_core_final/survey_agent/data</param>
+</tool>
+[/TOOL_CALL]
