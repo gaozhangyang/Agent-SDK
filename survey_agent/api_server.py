@@ -217,7 +217,7 @@ def run_pipeline_thread(run_id: str, config: Dict[str, Any]):
         )
 
         res = sdk_run(
-            f"从arXiv获取{today}最新论文，分类:{cats}，最多{config['global_settings']['fetch_max_papers']}篇，"
+            f"从arXiv获取最新论文，分类:{cats}，最多{config['global_settings']['fetch_max_papers']}篇，"
             f"写入data/raw_papers_{today}.json",
             [
                 {"type": "file", "query": "scripts/fetch_arxiv.py"},
