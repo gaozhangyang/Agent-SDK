@@ -200,48 +200,48 @@ def run_pipeline_thread(run_id: str, config: Dict[str, Any]):
             "stage_start", {"stage": "fetcher", "message": "开始从 arXiv 抓取论文..."}
         )
 
-        if DEBUG_MODE:
-            debug_broadcast("fetcher_start", {"timestamp": datetime.now().isoformat()})
+        # 直接使用本地脚本获取论文，不依赖 SDK
+        import subprocess
 
-        cats = list({c for t in config["topics"] for c in t["arxiv_categories"]})
+        cats_str = ",".join(cats)
+        raw_file = DATA_DIR / f"raw_papers_{today}.json"
 
-        # Debug: 显示正在连接的arxiv分类
         debug_broadcast(
-            "arxiv_connect",
+            "fetcher_start",
             {
                 "categories": cats,
                 "max_results": config["global_settings"]["fetch_max_papers"],
-                "date": today,
                 "timestamp": datetime.now().isoformat(),
             },
         )
 
-        res = sdk_run(
-            f"从arXiv获取最新论文，分类:{cats}，最多{config['global_settings']['fetch_max_papers']}篇，"
-            f"写入data/raw_papers_{today}.json",
-            [
-                {"type": "file", "query": "scripts/fetch_arxiv.py"},
-                {"type": "file", "query": "config/user_config.json"},
-            ],
-            "正在调用 arXiv API...",
-        )
+        try:
+            fetch_script = BASE_DIR / "scripts" / "fetch_arxiv.py"
+            result = subprocess.run(
+                [
+                    "python3",
+                    str(fetch_script),
+                    "-c",
+                    cats_str,
+                    "-m",
+                    str(config["global_settings"]["fetch_max_papers"]),
+                    "-o",
+                    str(raw_file),
+                ],
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+            if result.returncode != 0:
+                raise RuntimeError(f"Fetch failed: {result.stderr}")
 
-        # Debug: 打印 SDK 响应
-        print(
-            f"[DEBUG] Fetcher SDK response: {res.get('status')}, reason: {res.get('reason', 'N/A')}",
-            file=sys.stderr,
-        )
-
-        if res.get("status") not in ("completed", "escalated", "budget_exceeded"):
-            raise RuntimeError(f"Fetcher failed: {res.get('reason', 'Unknown error')}")
-
-        # 读取抓取结果
-        raw_file = DATA_DIR / f"raw_papers_{today}.json"
-        if raw_file.exists():
-            with open(raw_file, "r", encoding="utf-8") as f:
-                raw_papers = json.load(f)
-                raw_count = len(raw_papers)
-        else:
+            raw_count = 0
+            if raw_file.exists():
+                with open(raw_file, "r", encoding="utf-8") as f:
+                    raw_papers = json.load(f)
+                    raw_count = len(raw_papers)
+        except Exception as e:
+            print(f"[ERROR] Fetcher failed: {e}", file=sys.stderr)
             raw_count = 0
 
         run_state["summary"]["fetched"] = raw_count
