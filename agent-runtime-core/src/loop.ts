@@ -210,7 +210,7 @@ export async function runLoop(
       // 执行动作：解析 proposal 并调用实际工具
       // L0.4: "执行工具 [harness 自动快照]"
       try {
-        await executeProposal(proposal, primitives, state.permissions, trace, config.workDir);
+        await executeProposal(proposal, primitives, state, trace, config.workDir);
       } catch (execError) {
         const errorMsg = execError instanceof Error ? execError.message : String(execError);
         trace.append({ ts: Date.now(), kind: 'exec', data: { proposal, error: errorMsg } });
@@ -308,7 +308,7 @@ export async function runLoop(
 async function executeProposal(
   proposal: string,
   primitives: Primitives,
-  permissions: number,
+  state: AgentState,
   trace: Trace,
   workDir?: string,
 ): Promise<void> {
@@ -339,8 +339,8 @@ async function executeProposal(
     switch (action.type) {
       case 'write':
         // 需要至少 Level 1 权限（受控写）
-        if (permissions < 1) {
-          throw new Error(`权限不足：需要 Level 1（受控写），当前 ${permissions}`);
+        if (state.permissions < 1) {
+          throw new Error(`权限不足：需要 Level 1（受控写），当前 ${state.permissions}`);
         }
         if (!action.path || !action.content) {
           throw new Error('write 操作需要 path 和 content');
@@ -349,16 +349,24 @@ async function executeProposal(
         const writePath = workDir && !pathModule.isAbsolute(action.path)
           ? pathModule.join(workDir, action.path)
           : action.path;
-        await primitives.write(writePath, action.content);
+        // 对于survey_output.md，使用追加模式并添加时间戳和步骤标记
+        const isSurveyOutput = action.path.includes('survey_output');
+        let writeContent = action.content;
+        if (isSurveyOutput) {
+          // 获取当前步骤编号
+          const stepNum = state.iterationCount;
+          const timestamp = new Date().toISOString();
+          writeContent = `[step${stepNum}] ${timestamp}\n$ ${action.content.trim()}`;
+        }
+        await primitives.write(writePath, writeContent, isSurveyOutput);
         trace.append({ ts: Date.now(), kind: 'observe', data: { action: 'write', path: writePath } });
         break;
 
       case 'edit':
         // 需要至少 Level 1 权限（受控写）
-        if (permissions < 1) {
-          throw new Error(`权限不足：需要 Level 1（受控写），当前 ${permissions}`);
+        if (state.permissions < 1) {
+          throw new Error(`权限不足：需要 Level 1（受控写），当前 ${state.permissions}`);
         }
-        // edit 需要两个参数：old 和 new（在 action.content 中传递）
         if (!action.path || !action.content) {
           throw new Error('edit 操作需要 path 和 content (包含 old/new)');
         }
@@ -376,15 +384,15 @@ async function executeProposal(
 
       case 'bash':
         // 需要至少 Level 2 权限（受控执行）
-        if (permissions < 2) {
-          throw new Error(`权限不足：需要 Level 2（受控执行），当前 ${permissions}`);
+        if (state.permissions < 2) {
+          throw new Error(`权限不足：需要 Level 2（受控执行），当前 ${state.permissions}`);
         }
         if (!action.command) {
           throw new Error('bash 操作需要 command');
         }
         // 高风险命令需要 Level 3
-        if (isHighRiskCommand(action.command) && permissions < 3) {
-          throw new Error(`权限不足：高风险命令需要 Level 3，当前 ${permissions}`);
+        if (isHighRiskCommand(action.command) && state.permissions < 3) {
+          throw new Error(`权限不足：高风险命令需要 Level 3，当前 ${state.permissions}`);
         }
         const output = await primitives.bash(action.command);
         trace.append({ ts: Date.now(), kind: 'observe', data: { action: 'bash', command: action.command, output: output.slice(0, 200) } });

@@ -14,7 +14,7 @@ const execAsync = promisify(exec);
 
 export interface Primitives {
   read(path: string): Promise<string>;
-  write(path: string, content: string): Promise<void>;
+  write(path: string, content: string, append?: boolean): Promise<void>;
   edit(path: string, old: string, next: string): Promise<void>;  // old 须唯一匹配
   bash(command: string): Promise<string>;
 }
@@ -33,11 +33,25 @@ export const localPrimitives: Primitives = {
   /**
    * 写入文件内容（创建或覆写）
    * 自动创建父目录
+   * @param filePath 文件路径
+   * @param content 要写入的内容
+   * @param append 如果为true，则追加到文件末尾（适用于survey_output.md等日志文件）
    */
-  async write(filePath: string, content: string): Promise<void> {
+  async write(filePath: string, content: string, append: boolean = false): Promise<void> {
     const dir = dirname(filePath);
     await fs.mkdir(dir, { recursive: true });
-    await fs.writeFile(filePath, content, 'utf-8');
+    if (append && filePath.includes('survey_output')) {
+      // 追加模式：先读取现有内容，然后追加新内容
+      try {
+        const existing = await fs.readFile(filePath, 'utf-8');
+        await fs.writeFile(filePath, existing + '\n' + content, 'utf-8');
+      } catch {
+        // 文件不存在，直接创建
+        await fs.writeFile(filePath, content, 'utf-8');
+      }
+    } else {
+      await fs.writeFile(filePath, content, 'utf-8');
+    }
   },
 
   /**

@@ -6,7 +6,7 @@
  */
 export interface Primitives {
     read(path: string): Promise<string>;
-    write(path: string, content: string): Promise<void>;
+    write(path: string, content: string, append?: boolean): Promise<void>;
     edit(path: string, old: string, next: string): Promise<void>;
     bash(command: string): Promise<string>;
 }

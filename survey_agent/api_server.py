@@ -368,26 +368,89 @@ def run_pipeline_thread(run_id: str, config: Dict[str, Any]):
                         },
                     )
 
-                    # Debug: 显示正在下载PDF
+                    # 直接使用本地脚本下载PDF，而不是让SDK Agent自己决定如何下载
                     pdf_url = f"https://arxiv.org/pdf/{arxiv_id}.pdf"
+                    # 使用配置中的 pdf_download_dir
+                    pdf_download_dir = config["global_settings"].get(
+                        "pdf_download_dir", str(DATA_DIR / "pdfs")
+                    )
+                    pdf_dir = Path(pdf_download_dir)
+                    pdf_dir.mkdir(parents=True, exist_ok=True)
+                    pdf_path = pdf_dir / f"{arxiv_id}.pdf"
+
                     debug_broadcast(
                         "pdf_download_start",
                         {
                             "arxiv_id": arxiv_id,
                             "pdf_url": pdf_url,
+                            "target_path": str(pdf_path),
                             "timestamp": datetime.now().isoformat(),
                         },
                     )
 
+                    # 调用本地Python脚本下载PDF
+                    try:
+                        import subprocess
+
+                        download_script = BASE_DIR / "scripts" / "download_pdf.py"
+                        result = subprocess.run(
+                            ["python3", str(download_script), arxiv_id, str(pdf_path)],
+                            capture_output=True,
+                            text=True,
+                            timeout=60,
+                        )
+                        if result.returncode != 0:
+                            raise RuntimeError(f"PDF download failed: {result.stderr}")
+                        if not pdf_path.exists():
+                            raise RuntimeError(f"PDF file not created at {pdf_path}")
+                        pdf_downloads.append(arxiv_id)
+
+                        debug_broadcast(
+                            "pdf_download_done",
+                            {
+                                "arxiv_id": arxiv_id,
+                                "topic": target_topic,
+                                "pdf_path": str(pdf_path),
+                                "timestamp": datetime.now().isoformat(),
+                            },
+                        )
+                    except Exception as pdf_error:
+                        pdf_failures.append(
+                            {"arxiv_id": arxiv_id, "error": str(pdf_error)}
+                        )
+                        debug_broadcast(
+                            "pdf_download_failed",
+                            {
+                                "arxiv_id": arxiv_id,
+                                "error": str(pdf_error),
+                                "timestamp": datetime.now().isoformat(),
+                            },
+                        )
+                        # PDF下载失败时跳过这篇论文
+                        broadcast(
+                            "paper_failed",
+                            {
+                                "arxiv_id": arxiv_id,
+                                "reason": f"PDF download failed: {pdf_error}",
+                            },
+                        )
+                        failed += 1
+                        run_state["progress"]["current"] = i + 1
+                        continue
+
                     res = sdk_run(
                         f"深度分析 {paper['arxiv_id']}（{paper['title']}），"
-                        f"下载PDF，生成总结，写入knowledge_base/{target_topic}/paper_{paper['arxiv_id']}.md，"
+                        f"PDF已下载到{pdf_path}，生成总结，写入knowledge_base/{target_topic}/paper_{paper['arxiv_id']}.md，"
                         f"更新meta.json",
                         [
                             {"type": "file", "query": "templates/paper_summary.md"},
                             {
                                 "type": "file",
                                 "query": f"knowledge_base/{target_topic}/meta.json",
+                            },
+                            {
+                                "type": "file",
+                                "query": str(pdf_path),
                             },
                         ],
                         f"正在分析: {paper['title'][:40]}...",
@@ -399,17 +462,6 @@ def run_pipeline_thread(run_id: str, config: Dict[str, Any]):
                         "budget_exceeded",
                     ):
                         analyzed += 1
-                        pdf_downloads.append(arxiv_id)
-
-                        # Debug: 显示PDF下载成功
-                        debug_broadcast(
-                            "pdf_download_done",
-                            {
-                                "arxiv_id": arxiv_id,
-                                "topic": target_topic,
-                                "timestamp": datetime.now().isoformat(),
-                            },
-                        )
 
                         # Debug: 检查生成的文件是否存在
                         paper_file = KB_DIR / target_topic / f"paper_{arxiv_id}.md"

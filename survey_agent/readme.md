@@ -119,3 +119,74 @@ cd survey_agent && python api_server.py
    - 端到端完成时的统计信息
 
 @用户: opencode run "端到端运行的时候，显示: Pipeline error: Fetcher failed: Unknown error, 请帮我修复这个问题"
+
+@用户: opencode run "端到端运行本项目的时候，有两个问题: 1. 论文pdf无法从arxiv成功fetch并存储到本地 2. survey_output.md使用追加式补充输出, 不需要每次删除之前的内容。每一个新的输出按顺序追加[step1], [step2]这样的标志以及时间戳, 就像shell控制台一样带有执行命令, 和输出信息的概览"
+
+## 修复总结
+
+### 1. survey_output.md 追加写入问题
+
+**修改的文件：**
+- `agent-runtime-core/src/primitives.ts` - 添加了 `append` 参数支持追加写入
+- `agent-runtime-core/src/loop.ts` - 在写入 `survey_output.md` 时自动使用追加模式，并添加 `[stepX] timestamp` 格式的标记
+
+**效果：**
+- 现在每次新的输出会追加到文件末尾，而不是覆盖之前的内容
+- 每个输出会带有 `[step1]`, `[step2]` 这样的步骤标记和时间戳
+- 格式类似shell控制台：`[step1] 2026-03-02T10:30:00.000Z\n$ 执行命令...`
+
+### 2. PDF 从 arXiv 下载失败问题
+
+**修改的文件：**
+- `survey_agent/api_server.py` - 在 analyst 阶段，先使用本地 Python 脚本 `download_pdf.py` 直接下载 PDF，然后将本地路径作为 source 传递给 SDK
+
+**效果：**
+- PDF 下载不再依赖 SDK Agent 自行决定如何下载
+- 使用可靠的本地脚本下载 PDF，并保存到 `knowledge_base/{topic}/pdfs/{arxiv_id}.pdf`
+- 下载失败时会记录错误并跳过该论文，而不是让整个流程失败
+
+@用户: agent_runtime_core_final % opencode run "你能不能帮我做个单元测试, 看看论文pdf能不能从arxiv成功fetch并存储到本地, 如果不能请修复相关代码"
+
+============================== 5 passed in 9.91s ===============================
+
+# Todos
+[x] 创建单元测试目录和测试文件
+[x] 运行测试检查 PDF 下载功能
+[x] 修复测试中发现的问题
+
+## 测试结果总结
+
+✅ **所有测试都通过了！** arXiv PDF 下载功能工作正常。
+
+### 测试详情
+
+| 测试用例 | 结果 | 说明 |
+|---------|------|------|
+| `test_download_pdf_success` | ✅ PASSED | 成功从 arXiv 下载 PDF 并验证文件头 |
+| `test_download_pdf_to_custom_directory` | ✅ PASSED | 下载到自定义目录功能正常 |
+| `test_download_invalid_arxiv_id` | ✅ PASSED | 正确处理无效的 arXiv ID |
+| `test_pdf_file_integrity` | ✅ PASSED | PDF 文件完整性验证通过 |
+| `test_arxiv_pdf_url_format` | ✅ PASSED | URL 格式正确 |
+
+### 创建的文件
+
+- **测试文件**: `/Applications/workspace/ailab/research/agent_runtime_core_final/survey_agent/tests/test_arxiv_pdf.py`
+
+### 运行测试
+
+```bash
+cd /Applications/workspace/ailab/research/agent_runtime_core_final/survey_agent
+python3 -m pytest tests/test_arxiv_pdf.py -v
+```
+
+### 结论
+
+**不需要修复代码**，arXiv PDF 下载功能已经可以正常工作。测试验证了：
+
+1. ✅ 能够成功从 `https://arxiv.org/pdf/{arxiv_id}.pdf` 下载 PDF
+2. ✅ PDF 文件正确保存到本地
+3. ✅ PDF 文件头验证通过 (`%PDF-`)
+4. ✅ 文件大小合理（大于 10KB）
+5. ✅ 无效的 arXiv ID 会正确抛出 `RuntimeError`
+
+如果你想测试其他功能或有其他问题，请告诉我！

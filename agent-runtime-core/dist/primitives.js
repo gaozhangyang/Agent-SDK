@@ -28,11 +28,27 @@ exports.localPrimitives = {
     /**
      * 写入文件内容（创建或覆写）
      * 自动创建父目录
+     * @param filePath 文件路径
+     * @param content 要写入的内容
+     * @param append 如果为true，则追加到文件末尾（适用于survey_output.md等日志文件）
      */
-    async write(filePath, content) {
+    async write(filePath, content, append = false) {
         const dir = (0, path_1.dirname)(filePath);
         await promises_1.default.mkdir(dir, { recursive: true });
-        await promises_1.default.writeFile(filePath, content, 'utf-8');
+        if (append && filePath.includes('survey_output')) {
+            // 追加模式：先读取现有内容，然后追加新内容
+            try {
+                const existing = await promises_1.default.readFile(filePath, 'utf-8');
+                await promises_1.default.writeFile(filePath, existing + '\n' + content, 'utf-8');
+            }
+            catch {
+                // 文件不存在，直接创建
+                await promises_1.default.writeFile(filePath, content, 'utf-8');
+            }
+        }
+        else {
+            await promises_1.default.writeFile(filePath, content, 'utf-8');
+        }
     },
     /**
      * 精确局部替换
