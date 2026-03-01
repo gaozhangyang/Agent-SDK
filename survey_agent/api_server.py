@@ -202,7 +202,8 @@ def run_pipeline_thread(run_id: str, config: Dict[str, Any]):
 
         # 直接使用本地脚本获取论文，不依赖 SDK
         import subprocess
-
+        
+        cats = list({c for t in config["topics"] for c in t["arxiv_categories"]})
         cats_str = ",".join(cats)
         raw_file = DATA_DIR / f"raw_papers_{today}.json"
 
