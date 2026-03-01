@@ -57,8 +57,8 @@ class TestArxivPDFDownload(unittest.TestCase):
         result_path = download_pdf(
             arxiv_id=test_arxiv_id,
             output_path=output_path,
-            timeout=60,
-            max_retries=3
+            timeout=120,
+            max_retries=5
         )
         
         # 验证返回的路径
@@ -79,7 +79,7 @@ class TestArxivPDFDownload(unittest.TestCase):
     
     def test_download_pdf_to_custom_directory(self):
         """测试下载到自定义目录"""
-        test_arxiv_id = "2504.19064"
+        test_arxiv_id = "2602.23360"
         custom_dir = os.path.join(self.temp_dir, "custom_pdfs")
         os.makedirs(custom_dir, exist_ok=True)
         
@@ -88,8 +88,8 @@ class TestArxivPDFDownload(unittest.TestCase):
         result_path = download_pdf(
             arxiv_id=test_arxiv_id,
             output_path=output_path,
-            timeout=60,
-            max_retries=3
+            timeout=120,
+            max_retries=5
         )
         
         # 验证文件存在
@@ -109,7 +109,7 @@ class TestArxivPDFDownload(unittest.TestCase):
             download_pdf(
                 arxiv_id=invalid_arxiv_id,
                 output_path=os.path.join(self.temp_dir, "invalid.pdf"),
-                timeout=30,
+                timeout=60,
                 max_retries=2
             )
         
@@ -119,14 +119,14 @@ class TestArxivPDFDownload(unittest.TestCase):
     
     def test_pdf_file_integrity(self):
         """测试 PDF 文件完整性 - 验证文件哈希值"""
-        test_arxiv_id = "2504.19064"
+        test_arxiv_id = "2602.23360"
         output_path = os.path.join(self.temp_dir, f"{test_arxiv_id}.pdf")
         
         result_path = download_pdf(
             arxiv_id=test_arxiv_id,
             output_path=output_path,
-            timeout=60,
-            max_retries=3
+            timeout=120,
+            max_retries=5
         )
         
         # 计算文件哈希
@@ -154,7 +154,7 @@ class TestArxivURLConstruction(unittest.TestCase):
     def test_arxiv_pdf_url_format(self):
         """测试 arXiv PDF URL 格式"""
         test_ids = [
-            ("2504.19064", "https://arxiv.org/pdf/2504.19064.pdf"),
+            ("2602.23360", "https://arxiv.org/pdf/2602.23360.pdf"),
             ("2301.12345v2", "https://arxiv.org/pdf/2301.12345v2.pdf"),
             ("hep-th/9901001", "https://arxiv.org/pdf/hep-th/9901001.pdf"),
         ]
