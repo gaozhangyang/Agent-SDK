@@ -1,0 +1,9 @@
+{
+  "name": "NLP and Large Language Models",
+  "description": "研究自然语言处理、大型语言模型、提示工程等方向",
+  "keywords": ["LLM", "transformer", "RLHF", "instruction tuning", "RAG"],
+  "arxiv_categories": ["cs.CL", "cs.AI"],
+  "created_at": "2025-01-01",
+  "updated_at": "2025-01-01",
+  "paper_count": 0
+}
