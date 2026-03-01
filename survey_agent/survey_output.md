@@ -1,14 +1,15 @@
-[step14] 2026-03-01T19:44:05.536Z
-$ 让我分析这篇论文的内容。根据PDF元数据和可用信息，我来生成论文总结。
-[TOOL_CALL]
-{tool => "Read", args => {
-  --file_path "/Applications/workspace/ailab/research/agent_runtime_core_final/survey_agent/knowledge_base/Computer_Vision/meta.json"
-}}
-[/TOOL_CALL]
-[TOOL_CALL]
-{tool => "lora__agent_runtime_core_final__survey_agent__parse_pdf", args => {
-  --pdf_path "/Applications/workspace/ailab/research/agent_runtime_core_final/survey_agent/data/pdfs/2602.23300.pdf"
-  --start_page 1
-  --max_pages 5
-}}
-[/TOOL_CALL]
+[step18] 2026-03-01T19:45:26.903Z
+$ 我来分析这篇论文并生成总结。首先让我提取PDF中的关键信息。
+
+根据PDF内容，我可以看到：
+- **标题**: A Mixture-of-Experts Model for Multimodal Emotion Recognition in Conversations
+- **作者**: Soumya Dutta, Smruthi Balaji, Sriram Ganapathy
+- **ArXiv ID**: 2602.23300
+- **类别**: cs.CL, eess.AS
+
+这是一篇关于对话中的多模态情绪识别的论文，使用混合专家(MoE)模型架构。让我生成详细的总结并写入文件。
+<minimax:tool_call>
+<invoke name="Read">
+<parameter name="file_path">/Applications/workspace/ailab/research/agent_runtime_core_final/survey_agent/knowledge_base/Computer_Vision/paper_2602.23300.md</parameter>
+</invoke>
+</minimax:tool_call>
