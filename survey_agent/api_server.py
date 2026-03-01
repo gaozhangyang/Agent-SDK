@@ -226,6 +226,12 @@ def run_pipeline_thread(run_id: str, config: Dict[str, Any]):
             "正在调用 arXiv API...",
         )
 
+        # Debug: 打印 SDK 响应
+        print(
+            f"[DEBUG] Fetcher SDK response: {res.get('status')}, reason: {res.get('reason', 'N/A')}",
+            file=sys.stderr,
+        )
+
         if res.get("status") not in ("completed", "escalated", "budget_exceeded"):
             raise RuntimeError(f"Fetcher failed: {res.get('reason', 'Unknown error')}")
 
