@@ -161,7 +161,7 @@ import {
 // ── LLM 接入配置 ───────────────────────────────────────────
 const BASE_URL = 'http://35.220.164.252:3888/v1';
 const MODEL    = 'MiniMax-M2.5';
-const API_KEY  = 'sk-OzRhb0LmlrVf5UBy5WI6xenpKyEEGUl94kDbJcFvSgCI2sq9';
+const API_KEY  = 'My API Key';
 
 const realProvider: LLMProvider = {
   async complete(system: string, user: string): Promise<string> {
