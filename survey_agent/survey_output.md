@@ -1,11 +1,19 @@
-[step9] 2026-03-01T18:06:09.012Z
-$ 我将运行fetch_arxiv.py脚本来从arXiv获取最新论文。
+[step13] 2026-03-01T18:07:08.409Z
+$ 我将使用提供的 `fetch_arxiv.py` 脚本从 arXiv 获取最新论文。
 
-首先，让我进入正确的目录并执行命令：
-<minimax:tool_call>
-<invoke name="Bash">
-<parameter name="command">cd /Applications/workspace/ailab/research/agent_runtime_core_final/survey_agent/scripts && python fetch_arxiv.py -c "cs.CV,cs.CL,cs.AI,cs.LG" -m 100 -o ../data/raw_papers_2026-03-02.json</parameter>
-<parameter name="description">从arXiv获取最新论文</parameter>
-<parameter name="timeout">120</parameter>
-</invoke>
-</minimax:tool_call>
+```bash
+cd /Applications/workspace/ailab/research/agent_runtime_core_final/survey_agent && \
+python scripts/fetch_arxiv.py \
+  --categories "cs.CV,cs.CL,cs.AI,cs.LG" \
+  --max-results 100 \
+  --output data/raw_papers_2026-03-02.json
+```
+
+让我执行这个命令：
+
+<tool_call>
+<tool name="bash">
+command: <param name="command">cd /Applications/workspace/ailab/research/agent_runtime_core_final/survey_agent && python scripts/fetch_arxiv.py --categories "cs.CV,cs.CL,cs.AI,cs.LG" --max-results 100 --output data/raw_papers_2026-03-02.json</param>
+<description>从arXiv获取最新论文</description>
+</tool>
+</tool_call>
