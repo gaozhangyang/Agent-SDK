@@ -160,14 +160,26 @@ export async function runLoop(
       const riskResult = await llm.judge('risk', collectResult.context, String(state.custom['pendingProposal']));
       trace.append({ ts: Date.now(), kind: 'judge', data: { type: 'risk', decision: riskResult.result }, uncertainty: riskResult.uncertainty });
 
-      // 需要同时检查中英文关键词
+      // 需要同时检查中英文关键词，并检查是否明确拒绝
       const riskApproved = 
         riskResult.result.toLowerCase().includes('通过') || 
         riskResult.result.toLowerCase().includes('pass') ||
-        riskResult.result.toLowerCase().includes('approved');
+        riskResult.result.toLowerCase().includes('approved') ||
+        riskResult.result.toLowerCase().includes('允许') ||
+        riskResult.result.toLowerCase().includes('同意');
+      
+      // 检查是否明确拒绝
+      const riskRejected = 
+        riskResult.result.toLowerCase().includes('拒绝') ||
+        riskResult.result.toLowerCase().includes('reject') ||
+        riskResult.result.toLowerCase().includes('deny') ||
+        riskResult.result.toLowerCase().includes('不允许') ||
+        riskResult.result.toLowerCase().includes('不同意');
 
-      if (!riskApproved || riskResult.uncertainty.score > t.uncertaintyHigh) {
-        const reason = `Judge(risk) 拒绝或不确定性过高: ${riskResult.result}`;
+      if (riskRejected || (!riskApproved && riskResult.uncertainty.score > t.uncertaintyHigh)) {
+        const reason = riskRejected 
+          ? `Judge(risk) 拒绝: ${riskResult.result.slice(0, 200)}`
+          : `Judge(risk) 不确定性过高: ${riskResult.result.slice(0, 200)}`;
         trace.append({ ts: Date.now(), kind: 'escalate', data: { reason } });
         await config.onEscalate?.(reason, state);
         return { status: 'escalated', reason, state };

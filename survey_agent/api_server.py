@@ -99,6 +99,7 @@ def load_config() -> Dict[str, Any]:
                 "fetch_max_papers": 100,
                 "screening_threshold": 7.0,
                 "schedule_utc_hour": 8,
+                "debug": False,
                 "llm": {
                     "baseUrl": "http://35.220.164.252:3888/v1",
                     "model": "MiniMax-M2.5",
@@ -123,13 +124,29 @@ def run_pipeline_thread(run_id: str, config: Dict[str, Any]):
     import requests as req
 
     SDK_URL = config["global_settings"]["sdk_url"]
+    DEBUG_MODE = config["global_settings"].get("debug", False)
     today = datetime.now().strftime("%Y-%m-%d")
+
+    def debug_broadcast(event: str, data: Dict[str, Any]):
+        """仅在debug模式下发送调试事件"""
+        if DEBUG_MODE:
+            broadcast(f"debug_{event}", data)
 
     def sdk_run(goal: str, sources: List[Dict], msg: str = "") -> Dict:
         """调用 SDK /run 接口"""
         broadcast(
             "agent_progress",
             {"stage": run_state["stage"], "message": msg or goal[:100]},
+        )
+
+        # Debug: 显示正在调用的sources
+        debug_broadcast(
+            "sdk_call",
+            {
+                "goal": goal[:200],
+                "sources": [s.get("query", str(s))[:100] for s in sources],
+                "timestamp": datetime.now().isoformat(),
+            },
         )
 
         try:
@@ -141,16 +158,41 @@ def run_pipeline_thread(run_id: str, config: Dict[str, Any]):
                     "collectConfig": {"sources": sources, "maxTokens": 6000},
                     "llm": config["global_settings"]["llm"],
                     "thresholds": {"maxIterations": 30, "maxNoProgress": 3},
+                    "debug": DEBUG_MODE,
                 },
                 timeout=300,
             )
-            return r.json()
+            result = r.json()
+
+            # Debug: 显示SDK返回结果
+            debug_broadcast(
+                "sdk_result",
+                {
+                    "status": result.get("status"),
+                    "trace_length": result.get("traceLength", 0),
+                    "timestamp": datetime.now().isoformat(),
+                },
+            )
+
+            return result
         except Exception as e:
+            debug_broadcast(
+                "sdk_error", {"error": str(e), "timestamp": datetime.now().isoformat()}
+            )
             return {"status": "error", "reason": str(e)}
 
     try:
         run_state["status"] = "running"
-        broadcast("pipeline_start", {"run_id": run_id, "date": today})
+        broadcast(
+            "pipeline_start",
+            {"run_id": run_id, "date": today, "debug_mode": DEBUG_MODE},
+        )
+
+        if DEBUG_MODE:
+            debug_broadcast(
+                "pipeline_start",
+                {"run_id": run_id, "timestamp": datetime.now().isoformat()},
+            )
 
         # === Step 1: Fetcher ===
         run_state["stage"] = "fetcher"
@@ -158,7 +200,22 @@ def run_pipeline_thread(run_id: str, config: Dict[str, Any]):
             "stage_start", {"stage": "fetcher", "message": "开始从 arXiv 抓取论文..."}
         )
 
+        if DEBUG_MODE:
+            debug_broadcast("fetcher_start", {"timestamp": datetime.now().isoformat()})
+
         cats = list({c for t in config["topics"] for c in t["arxiv_categories"]})
+
+        # Debug: 显示正在连接的arxiv分类
+        debug_broadcast(
+            "arxiv_connect",
+            {
+                "categories": cats,
+                "max_results": config["global_settings"]["fetch_max_papers"],
+                "date": today,
+                "timestamp": datetime.now().isoformat(),
+            },
+        )
+
         res = sdk_run(
             f"从arXiv获取{today}最新论文，分类:{cats}，最多{config['global_settings']['fetch_max_papers']}篇，"
             f"写入data/raw_papers_{today}.json",
@@ -169,7 +226,7 @@ def run_pipeline_thread(run_id: str, config: Dict[str, Any]):
             "正在调用 arXiv API...",
         )
 
-        if res.get("status") not in ("completed", "escalated"):
+        if res.get("status") not in ("completed", "escalated", "budget_exceeded"):
             raise RuntimeError(f"Fetcher failed: {res.get('reason', 'Unknown error')}")
 
         # 读取抓取结果
@@ -182,6 +239,17 @@ def run_pipeline_thread(run_id: str, config: Dict[str, Any]):
             raw_count = 0
 
         run_state["summary"]["fetched"] = raw_count
+
+        # Debug: 显示抓取结果
+        debug_broadcast(
+            "fetcher_done",
+            {
+                "fetched_count": raw_count,
+                "file_path": str(raw_file),
+                "timestamp": datetime.now().isoformat(),
+            },
+        )
+
         broadcast("stage_done", {"stage": "fetcher", "result": {"fetched": raw_count}})
 
         # === Step 2: Screener ===
@@ -191,6 +259,16 @@ def run_pipeline_thread(run_id: str, config: Dict[str, Any]):
             {"stage": "screener", "message": f"筛选 {raw_count} 篇论文..."},
         )
 
+        if DEBUG_MODE:
+            debug_broadcast(
+                "screener_start",
+                {
+                    "raw_count": raw_count,
+                    "threshold": config["global_settings"]["screening_threshold"],
+                    "timestamp": datetime.now().isoformat(),
+                },
+            )
+
         # 读取黑名单
         bl_path = DATA_DIR / "blacklist.json"
         blacklist = json.loads(bl_path.read_text()) if bl_path.exists() else []
@@ -199,6 +277,17 @@ def run_pipeline_thread(run_id: str, config: Dict[str, Any]):
         )
 
         threshold = config["global_settings"]["screening_threshold"]
+
+        # Debug: 显示筛选参数
+        debug_broadcast(
+            "screening_params",
+            {
+                "threshold": threshold,
+                "blacklist_count": len(blacklist),
+                "timestamp": datetime.now().isoformat(),
+            },
+        )
+
         res = sdk_run(
             f"筛选data/raw_papers_{today}.json，结合各板块meta.json，评分阈值{threshold}，"
             f"输出data/selected_papers_{today}.json。{bl_note}",
@@ -212,19 +301,30 @@ def run_pipeline_thread(run_id: str, config: Dict[str, Any]):
             "LLM 正在对论文打分...",
         )
 
-        if res.get("status") not in ("completed", "escalated"):
+        if res.get("status") not in ("completed", "escalated", "budget_exceeded"):
             raise RuntimeError(f"Screener failed: {res.get('reason', 'Unknown error')}")
 
         # 读取筛选结果
         selected_file = DATA_DIR / f"selected_papers_{today}.json"
+        selected = []
+        selected_count = 0
         if selected_file.exists():
             with open(selected_file, "r", encoding="utf-8") as f:
                 selected = json.load(f)
                 selected_count = len(selected)
-        else:
-            selected_count = 0
 
         run_state["summary"]["selected"] = selected_count
+
+        # Debug: 显示筛选结果
+        debug_broadcast(
+            "screener_done",
+            {
+                "selected_count": selected_count,
+                "file_path": str(selected_file),
+                "timestamp": datetime.now().isoformat(),
+            },
+        )
+
         broadcast(
             "stage_done", {"stage": "screener", "result": {"selected": selected_count}}
         )
@@ -237,12 +337,48 @@ def run_pipeline_thread(run_id: str, config: Dict[str, Any]):
             {"stage": "analyst", "message": f"精读 {selected_count} 篇论文..."},
         )
 
+        if DEBUG_MODE:
+            debug_broadcast(
+                "analyst_start",
+                {
+                    "total_papers": selected_count,
+                    "timestamp": datetime.now().isoformat(),
+                },
+            )
+
         analyzed = failed = 0
+        pdf_downloads = []
+        pdf_failures = []
 
         if selected_count > 0:
             for i, paper in enumerate(selected):
                 try:
                     target_topic = paper.get("target_topic", "unknown")
+                    arxiv_id = paper.get("arxiv_id", "")
+
+                    # Debug: 显示即将分析的论文信息
+                    debug_broadcast(
+                        "paper_analysis_start",
+                        {
+                            "arxiv_id": arxiv_id,
+                            "title": paper.get("title", "")[:100],
+                            "topic": target_topic,
+                            "progress": {"current": i + 1, "total": selected_count},
+                            "timestamp": datetime.now().isoformat(),
+                        },
+                    )
+
+                    # Debug: 显示正在下载PDF
+                    pdf_url = f"https://arxiv.org/pdf/{arxiv_id}.pdf"
+                    debug_broadcast(
+                        "pdf_download_start",
+                        {
+                            "arxiv_id": arxiv_id,
+                            "pdf_url": pdf_url,
+                            "timestamp": datetime.now().isoformat(),
+                        },
+                    )
+
                     res = sdk_run(
                         f"深度分析 {paper['arxiv_id']}（{paper['title']}），"
                         f"下载PDF，生成总结，写入knowledge_base/{target_topic}/paper_{paper['arxiv_id']}.md，"
@@ -257,8 +393,36 @@ def run_pipeline_thread(run_id: str, config: Dict[str, Any]):
                         f"正在分析: {paper['title'][:40]}...",
                     )
 
-                    if res.get("status") == "completed":
+                    if res.get("status") in (
+                        "completed",
+                        "escalated",
+                        "budget_exceeded",
+                    ):
                         analyzed += 1
+                        pdf_downloads.append(arxiv_id)
+
+                        # Debug: 显示PDF下载成功
+                        debug_broadcast(
+                            "pdf_download_done",
+                            {
+                                "arxiv_id": arxiv_id,
+                                "topic": target_topic,
+                                "timestamp": datetime.now().isoformat(),
+                            },
+                        )
+
+                        # Debug: 检查生成的文件是否存在
+                        paper_file = KB_DIR / target_topic / f"paper_{arxiv_id}.md"
+                        debug_broadcast(
+                            "paper_file_created",
+                            {
+                                "arxiv_id": arxiv_id,
+                                "file_path": str(paper_file),
+                                "file_exists": paper_file.exists(),
+                                "timestamp": datetime.now().isoformat(),
+                            },
+                        )
+
                         broadcast(
                             "paper_analyzed",
                             {
@@ -274,6 +438,20 @@ def run_pipeline_thread(run_id: str, config: Dict[str, Any]):
 
                 except Exception as e:
                     failed += 1
+                    pdf_failures.append(
+                        {"arxiv_id": paper.get("arxiv_id", ""), "error": str(e)}
+                    )
+
+                    # Debug: 显示PDF下载失败
+                    debug_broadcast(
+                        "pdf_download_failed",
+                        {
+                            "arxiv_id": paper.get("arxiv_id", ""),
+                            "error": str(e),
+                            "timestamp": datetime.now().isoformat(),
+                        },
+                    )
+
                     broadcast(
                         "paper_failed",
                         {"arxiv_id": paper["arxiv_id"], "reason": str(e)},
@@ -284,6 +462,31 @@ def run_pipeline_thread(run_id: str, config: Dict[str, Any]):
         run_state["status"] = "completed"
         run_state["finished_at"] = datetime.now().isoformat()
         run_state["summary"].update({"analyzed": analyzed, "failed": failed})
+
+        # Debug: 显示最终统计
+        debug_broadcast(
+            "analyst_done",
+            {
+                "analyzed_count": analyzed,
+                "failed_count": failed,
+                "pdf_downloads": pdf_downloads,
+                "pdf_failures": pdf_failures,
+                "timestamp": datetime.now().isoformat(),
+            },
+        )
+
+        # Debug: 发送端到端完成事件，用于网页端验证
+        debug_broadcast(
+            "e2e_complete",
+            {
+                "run_id": run_id,
+                "fetched": run_state["summary"].get("fetched", 0),
+                "selected": run_state["summary"].get("selected", 0),
+                "analyzed": analyzed,
+                "pdf_downloads_count": len(pdf_downloads),
+                "timestamp": datetime.now().isoformat(),
+            },
+        )
 
         broadcast(
             "pipeline_done",
@@ -526,6 +729,21 @@ async def get_config():
         config["global_settings"]["llm"]["apiKey"] = "***"
 
     return config
+
+
+@app.put("/api/config/debug")
+async def update_debug_config(body: dict):
+    """更新debug配置"""
+    config = load_config()
+    debug_enabled = body.get("debug", False)
+
+    if "global_settings" not in config:
+        config["global_settings"] = {}
+
+    config["global_settings"]["debug"] = debug_enabled
+    save_config(config)
+
+    return {"ok": True, "debug": debug_enabled}
 
 
 @app.put("/api/config/topics")

@@ -4,24 +4,51 @@
       "folder": "NLP_and_LLM",
       "name": "NLP and Large Language Models",
       "description": "大型语言模型、指令微调、对齐、推理优化",
-      "keywords": ["LLM", "transformer", "RLHF", "RAG", "chain-of-thought", "fine-tuning"],
-      "arxiv_categories": ["cs.CL", "cs.AI"],
+      "keywords": [
+        "LLM",
+        "transformer",
+        "RLHF",
+        "RAG",
+        "chain-of-thought",
+        "fine-tuning"
+      ],
+      "arxiv_categories": [
+        "cs.CL",
+        "cs.AI"
+      ],
       "max_papers_per_day": 3
     },
     {
       "folder": "Computer_Vision",
       "name": "Computer Vision",
       "description": "图像理解、目标检测、视觉生成模型",
-      "keywords": ["diffusion", "ViT", "detection", "segmentation", "multimodal"],
-      "arxiv_categories": ["cs.CV"],
+      "keywords": [
+        "diffusion",
+        "ViT",
+        "detection",
+        "segmentation",
+        "multimodal"
+      ],
+      "arxiv_categories": [
+        "cs.CV"
+      ],
       "max_papers_per_day": 2
     },
     {
       "folder": "Reinforcement_Learning",
       "name": "Reinforcement Learning",
       "description": "策略优化、奖励建模、多智能体系统",
-      "keywords": ["PPO", "MCTS", "Multi-agent", "Reward", "RLHF"],
-      "arxiv_categories": ["cs.LG", "cs.AI"],
+      "keywords": [
+        "PPO",
+        "MCTS",
+        "Multi-agent",
+        "Reward",
+        "RLHF"
+      ],
+      "arxiv_categories": [
+        "cs.LG",
+        "cs.AI"
+      ],
       "max_papers_per_day": 2
     }
   ],
@@ -29,6 +56,7 @@
     "fetch_max_papers": 100,
     "screening_threshold": 7.0,
     "schedule_utc_hour": 8,
+    "debug": true,
     "llm": {
       "baseUrl": "http://35.220.164.252:3888/v1",
       "model": "MiniMax-M2.5",

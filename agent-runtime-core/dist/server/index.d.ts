@@ -22,5 +22,6 @@ export type RunRequestBody = {
         maxNoProgress?: number;
         maxCollectRetry?: number;
     };
+    debug?: boolean;
 };
 //# sourceMappingURL=index.d.ts.map

@@ -40,13 +40,23 @@ class LLMCall {
      */
     async judge(type, context, input) {
         const typeDescriptions = {
-            outcome: '判断子目标是否达成（是/否 + 理由）',
-            risk: '判断操作是否允许执行，权限是否满足（通过/拒绝 + 理由）',
-            selection: '从多个候选方案中选出最优（选项编号 + 理由）',
+            outcome: '判断子目标是否达成',
+            risk: '判断操作是否允许执行',
+            selection: '从多个候选方案中选出最优',
         };
-        const system = `你是一个裁决 Agent。任务类型：${typeDescriptions[type]}。
-请给出明确结论，并在末尾以 JSON 输出：
-{"decision": "...", "uncertainty": {"score": 0-1, "reasons": []}}`;
+        const system = `你是一个裁决 Agent。
+任务类型：${typeDescriptions[type]}
+
+重要规则：
+1. 对于 risk 类型：如果操作不涉及高风险命令（rm -rf、删除文件、网络危险操作等），应明确返回"通过"
+2. 对于 selection 类型：只需返回选项编号
+3. 你的最终决策必须明确：只用返回"通过"或"拒绝"（对于 risk），或明确的选项（对于 selection）
+
+请给出结论，格式如下：
+通过/拒绝: 理由
+
+然后在末尾以 JSON 输出：
+{"decision": "通过/拒绝/选项编号", "uncertainty": {"score": 0-1, "reasons": []}}`;
         const raw = await this.provider.complete(system, `Context:\n${context}\n\nInput:\n${input}`);
         return this.parseWithUncertainty(raw);
     }

@@ -42,6 +42,7 @@ export type RunRequestBody = {
     maxNoProgress?: number;
     maxCollectRetry?: number;
   };
+  debug?: boolean;  // 调试模式开关
 };
 
 /** 可序列化的 State 摘要（供 HTTP 返回） */
@@ -71,7 +72,7 @@ app.get('/health', (_req: Request, res: Response) => {
 app.post('/run', async (req: Request, res: Response) => {
   try {
     const body = req.body as RunRequestBody;
-    const { goal, subgoals = [], workDir, collectConfig, llm: llmConfig, thresholds } = body;
+    const { goal, subgoals = [], workDir, collectConfig, llm: llmConfig, thresholds, debug = false } = body;
 
     if (!goal || typeof workDir !== 'string') {
       res.status(400).json({ error: '缺少 goal 或 workDir' });
@@ -84,6 +85,16 @@ app.post('/run', async (req: Request, res: Response) => {
     if (!llmConfig?.baseUrl || !llmConfig?.model || !llmConfig?.apiKey) {
       res.status(400).json({ error: 'llm 需提供 baseUrl、model、apiKey' });
       return;
+    }
+
+    // Debug: 打印请求信息
+    if (debug) {
+      console.log('[DEBUG] Received run request:', {
+        goal: goal.substring(0, 100),
+        workDir,
+        sources: collectConfig.sources.map((s: CollectSource) => s.query),
+        debug
+      });
     }
 
     const baseUrl = llmConfig.baseUrl.replace(/\/$/, '');
@@ -171,14 +182,20 @@ app.post('/run', async (req: Request, res: Response) => {
 
     res.json({
       status: result.status,
-      reason: 'reason' in result ? result.reason : undefined,
+      reason: result.status === 'escalated' && 'reason' in result ? result.reason : (result.status === 'budget_exceeded' ? 'budget_exceeded: 迭代次数超出限制' : undefined),
       state: serializeState(result.state),
       traceJson: trace.serialize(),
       traceLength: trace.all().length,
+      debug: debug ? {
+        iterations: result.state.iterationCount,
+        mode: result.state.mode,
+        subgoalsRemaining: result.state.subgoals.length,
+      } : undefined,
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    res.status(500).json({ error: message });
+    console.error('[SDK Error]', message);
+    res.status(500).json({ status: 'error', reason: message });
   }
 });
 

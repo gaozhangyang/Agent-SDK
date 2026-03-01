@@ -128,6 +128,96 @@
   .run-btn:active { transform: scale(0.98); }
   .run-btn:disabled { background: var(--warm-mid); cursor: not-allowed; }
 
+  /* DEBUG TOGGLE */
+  .debug-toggle {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    cursor: pointer;
+    font-family: 'DM Mono', monospace;
+    font-size: 0.62rem;
+    color: var(--text-secondary);
+    letter-spacing: 0.05em;
+  }
+  
+  .debug-toggle input {
+    width: 14px;
+    height: 14px;
+    accent-color: var(--accent-amber);
+  }
+  
+  .debug-label {
+    text-transform: uppercase;
+  }
+
+  /* DEBUG PANEL */
+  .debug-panel {
+    position: fixed;
+    bottom: 2rem;
+    left: 2rem;
+    background: var(--ink);
+    border-radius: 4px;
+    padding: 1rem;
+    min-width: 400px;
+    max-height: 300px;
+    overflow-y: auto;
+    box-shadow: 0 12px 40px rgba(0,0,0,0.3);
+    z-index: 200;
+    display: none;
+    font-family: 'DM Mono', monospace;
+    font-size: 0.6rem;
+  }
+  
+  .debug-panel.visible { display: block; }
+  
+  .debug-panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 0.8rem;
+    padding-bottom: 0.5rem;
+    border-bottom: 1px solid rgba(255,255,255,0.2);
+  }
+  
+  .debug-panel-title {
+    color: var(--accent-amber);
+    font-size: 0.65rem;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+  }
+  
+  .debug-panel-close {
+    color: rgba(255,255,255,0.4);
+    cursor: pointer;
+    font-size: 0.7rem;
+  }
+  
+  .debug-panel-close:hover { color: white; }
+  
+  .debug-item {
+    padding: 0.4rem 0;
+    border-bottom: 1px solid rgba(255,255,255,0.08);
+    color: rgba(255,255,255,0.7);
+    word-break: break-all;
+  }
+  
+  .debug-item:last-child { border-bottom: none; }
+  
+  .debug-event {
+    color: var(--accent-teal);
+    font-weight: 500;
+  }
+  
+  .debug-time {
+    color: rgba(255,255,255,0.3);
+    font-size: 0.55rem;
+    margin-left: 0.5rem;
+  }
+  
+  .debug-success { color: var(--accent-teal); }
+  .debug-error { color: var(--accent-red); }
+  .debug-info { color: var(--accent-amber); }
+
   /* HERO */
   .hero {
     min-height: 100vh;
@@ -1034,6 +1124,10 @@
     <li><a href="#papers">最新论文</a></li>
   </ul>
   <div style="display:flex;align-items:center;gap:1rem">
+    <label class="debug-toggle">
+      <input type="checkbox" id="debugToggle" onchange="toggleDebug()">
+      <span class="debug-label">调试</span>
+    </label>
     <button class="run-btn" id="runBtn" onclick="triggerRun()">运行 Agent</button>
     <div class="nav-date" id="navDate"></div>
   </div>
@@ -1176,6 +1270,17 @@
   <div class="progress-text" id="progressText">0%</div>
 </div>
 
+<!-- DEBUG PANEL -->
+<div class="debug-panel" id="debugPanel">
+  <div class="debug-panel-header">
+    <div class="debug-panel-title">🔧 调试面板</div>
+    <div class="debug-panel-close" onclick="closeDebugPanel()">✕ 关闭</div>
+  </div>
+  <div id="debugContent">
+    <div class="debug-item" style="color:rgba(255,255,255,0.4)">等待调试事件...</div>
+  </div>
+</div>
+
 <!-- MODAL -->
 <div class="modal-overlay" id="modalOverlay">
   <div class="modal" id="modalContent">
@@ -1190,6 +1295,8 @@ let topics = [];
 let papers = [];
 let currentFilter = 'all';
 let runEventSource = null;
+let debugMode = false;
+let debugEvents = [];
 
 // ==================== INIT ====================
 document.addEventListener('DOMContentLoaded', async () => {
@@ -1197,12 +1304,29 @@ document.addEventListener('DOMContentLoaded', async () => {
   animateStats();
   buildHeatmap();
   
+  // 加载配置，获取debug状态
+  await loadConfig();
+  
   // 加载数据
   await loadTopics();
   await loadPapers();
   await loadTrends();
   buildRecentActivity();
 });
+
+async function loadConfig() {
+  try {
+    const res = await fetch('/api/config');
+    const config = await res.json();
+    debugMode = config.global_settings?.debug || false;
+    document.getElementById('debugToggle').checked = debugMode;
+    if (debugMode) {
+      showDebugPanel();
+    }
+  } catch (e) {
+    console.error('Failed to load config:', e);
+  }
+}
 
 // ==================== API CALLS ====================
 async function loadTopics() {
@@ -1645,6 +1769,13 @@ function resetRunStatus() {
 function connectSSE(runId) {
   runEventSource = new EventSource('/api/run/stream');
   
+  // 在debug模式下同时连接debug事件
+  let debugEventSource = null;
+  if (debugMode) {
+    debugEventSource = connectDebugEvents(runId);
+    addDebugEvent('pipeline_start', `开始运行: ${runId}`, 'info');
+  }
+  
   runEventSource.addEventListener('pipeline_start', e => {
     const data = JSON.parse(e.data);
     document.getElementById('runPanelTitle').textContent = `运行中: ${data.run_id}`;
@@ -1655,6 +1786,9 @@ function connectSSE(runId) {
     const stage = capitalize(data.stage);
     document.getElementById(`stage${stage}`).className = 'stage-dot active';
     document.getElementById(`status${stage}`).textContent = '进行中';
+    if (debugMode) {
+      addDebugEvent('stage_start', `阶段开始: ${data.stage} - ${data.message}`, 'info');
+    }
   });
   
   runEventSource.addEventListener('stage_done', e => {
@@ -1662,6 +1796,9 @@ function connectSSE(runId) {
     const stage = capitalize(data.stage);
     document.getElementById(`stage${stage}`).className = 'stage-dot done';
     document.getElementById(`status${stage}`).textContent = `完成: ${JSON.stringify(data.result)}`;
+    if (debugMode) {
+      addDebugEvent('stage_done', `阶段完成: ${data.stage}`, 'success');
+    }
   });
   
   runEventSource.addEventListener('paper_analyzed', e => {
@@ -1670,6 +1807,9 @@ function connectSSE(runId) {
     const pct = Math.round((progress.current / progress.total) * 100);
     document.getElementById('progressFill').style.width = `${pct}%`;
     document.getElementById('progressText').textContent = `${progress.current}/${progress.total} 篇`;
+    if (debugMode) {
+      addDebugEvent('paper_analyzed', `论文分析完成: ${data.arxiv_id}`, 'success');
+    }
   });
   
   runEventSource.addEventListener('pipeline_done', e => {
@@ -1680,12 +1820,18 @@ function connectSSE(runId) {
     
     if (data.status === 'completed') {
       document.getElementById('runPanelTitle').textContent = '运行完成';
+      if (debugMode) {
+        addDebugEvent('pipeline_done', `运行完成! 抓取:${data.summary.fetched} 筛选:${data.summary.selected} 分析:${data.summary.analyzed}`, 'success');
+      }
       alert(`运行完成！抓取: ${data.summary.fetched}, 筛选: ${data.summary.selected}, 分析: ${data.summary.analyzed}`);
       // 刷新数据
       loadTopics();
       loadPapers();
     } else {
       document.getElementById('runPanelTitle').textContent = '运行失败';
+      if (debugMode) {
+        addDebugEvent('pipeline_failed', `运行失败: ${data.error}`, 'error');
+      }
       alert(`运行失败: ${data.error}`);
     }
     
@@ -1696,6 +1842,9 @@ function connectSSE(runId) {
   
   runEventSource.onerror = () => {
     console.log('SSE connection closed');
+    if (debugEventSource) {
+      debugEventSource.close();
+    }
   };
 }
 
@@ -1711,6 +1860,148 @@ async function submitFeedback(arxivId, rating, tags) {
   } catch (e) {
     alert('提交失败');
   }
+}
+
+// ==================== DEBUG FUNCTIONS ====================
+async function toggleDebug() {
+  const debugEnabled = document.getElementById('debugToggle').checked;
+  try {
+    await fetch('/api/config/debug', {
+      method: 'PUT',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ debug: debugEnabled })
+    });
+    debugMode = debugEnabled;
+    if (debugMode) {
+      showDebugPanel();
+      addDebugEvent('debug_enabled', '调试模式已开启', 'success');
+    } else {
+      closeDebugPanel();
+      addDebugEvent('debug_disabled', '调试模式已关闭', 'info');
+    }
+  } catch (e) {
+    alert('更新调试设置失败');
+    document.getElementById('debugToggle').checked = debugMode;
+  }
+}
+
+function showDebugPanel() {
+  document.getElementById('debugPanel').classList.add('visible');
+}
+
+function closeDebugPanel() {
+  document.getElementById('debugPanel').classList.remove('visible');
+}
+
+function addDebugEvent(event, message, type = 'info') {
+  const timestamp = new Date().toLocaleTimeString();
+  debugEvents.push({ event, message, type, timestamp });
+  
+  // 只保留最近50条
+  if (debugEvents.length > 50) {
+    debugEvents.shift();
+  }
+  
+  renderDebugEvents();
+}
+
+function renderDebugEvents() {
+  const container = document.getElementById('debugContent');
+  if (!container) return;
+  
+  container.innerHTML = debugEvents.map(e => `
+    <div class="debug-item">
+      <span class="debug-event">${e.event}</span>: 
+      <span class="debug-${e.type}">${e.message}</span>
+      <span class="debug-time">${e.timestamp}</span>
+    </div>
+  `).join('');
+  
+  // 自动滚动到底部
+  container.scrollTop = container.scrollHeight;
+}
+
+function connectDebugEvents(runId) {
+  if (!debugMode) return;
+  
+  const debugEventSource = new EventSource('/api/run/stream');
+  
+  // 监听所有debug开头的SSE事件
+  const debugEventTypes = [
+    'debug_pipeline_start',
+    'debug_fetcher_start',
+    'debug_arxiv_connect',
+    'debug_fetcher_done',
+    'debug_screener_start',
+    'debug_screening_params',
+    'debug_screener_done',
+    'debug_analyst_start',
+    'debug_pdf_download_start',
+    'debug_pdf_download_done',
+    'debug_pdf_download_failed',
+    'debug_paper_analysis_start',
+    'debug_paper_file_created',
+    'debug_analyst_done',
+    'debug_e2e_complete',
+    'debug_sdk_call',
+    'debug_sdk_result',
+    'debug_sdk_error'
+  ];
+  
+  debugEventTypes.forEach(eventType => {
+    debugEventSource.addEventListener(eventType, e => {
+      const data = JSON.parse(e.data);
+      let message = '';
+      let displayType = 'info';
+      
+      // 格式化不同类型的事件消息
+      switch(eventType) {
+        case 'debug_arxiv_connect':
+          message = `正在连接 arXiv，分类: ${data.categories?.join(', ')}`;
+          break;
+        case 'debug_fetcher_done':
+          message = `抓取完成，获取 ${data.fetched_count} 篇论文`;
+          displayType = 'success';
+          break;
+        case 'debug_pdf_download_start':
+          message = `开始下载 PDF: ${data.arxiv_id}`;
+          break;
+        case 'debug_pdf_download_done':
+          message = `PDF 下载成功: ${data.arxiv_id} (${data.topic})`;
+          displayType = 'success';
+          break;
+        case 'debug_pdf_download_failed':
+          message = `PDF 下载失败: ${data.arxiv_id} - ${data.error}`;
+          displayType = 'error';
+          break;
+        case 'debug_paper_file_created':
+          message = `论文文件 ${data.file_exists ? '已创建' : '未找到'}: ${data.arxiv_id}`;
+          displayType = data.file_exists ? 'success' : 'error';
+          break;
+        case 'debug_e2e_complete':
+          message = `端到端完成! 抓取:${data.fetched} 筛选:${data.selected} 分析:${data.analyzed} PDF下载:${data.pdf_downloads_count}`;
+          displayType = 'success';
+          break;
+        case 'debug_sdk_call':
+          message = `SDK调用: ${data.goal?.substring(0, 50)}...`;
+          break;
+        case 'debug_sdk_result':
+          message = `SDK返回: ${data.status}, trace长度: ${data.trace_length}`;
+          displayType = data.status === 'completed' ? 'success' : 'info';
+          break;
+        case 'debug_sdk_error':
+          message = `SDK错误: ${data.error}`;
+          displayType = 'error';
+          break;
+        default:
+          message = JSON.stringify(data).substring(0, 100);
+      }
+      
+      addDebugEvent(eventType.replace('debug_', ''), message, displayType);
+    });
+  });
+  
+  return debugEventSource;
 }
 
 // ==================== UTILS ====================
