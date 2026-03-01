@@ -1,9 +1,16 @@
-[step18] 2026-03-01T20:32:58.897Z
-$ 我来深度分析这篇论文并生成总结。首先让我查看更多PDF内容以获取关键信息。
-<minimax:tool_call>
-<invoke name="Read">
-<parameter name="file_path">/Applications/workspace/ailab/research/agent_runtime_core_final/survey_agent/data/pdfs/2602.23229.pdf</parameter>
-<parameter name="offset">0</parameter>
-<parameter name="limit">5000</parameter>
-</invoke>
-</minimax:tool_call>
+[step2] 2026-03-01T20:34:02.248Z
+$ 我需要从PDF中提取更多关键信息来完成深度分析。让我继续处理PDF内容。
+[TOOL_CALL]
+{tool => "read_pdf_text", args => {
+  --path "/Applications/workspace/ailab/research/agent_runtime_core_final/survey_agent/data/pdfs/2602.23228.pdf"
+  --start_page 1
+  --max_pages 3
+}}
+[/TOOL_CALL]
+[TOOL_CALL]
+{tool => "read_pdf_text", args => {
+  --path "/Applications/workspace/ailab/research/agent_runtime_core_final/survey_agent/data/pdfs/2602.23228.pdf"
+  --start_page 4
+  --max_pages 3
+}}
+[/TOOL_CALL]
