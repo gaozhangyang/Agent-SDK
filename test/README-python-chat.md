@@ -56,7 +56,5 @@ python test_agent_chat.py
 若输出中出现「对话验证完成：Reason + Judge 调用成功」，即表示与 SDK 的 LLM 调用语义一致、且能成功对话。
 
 ## 与 SDK 的关系
-
-- **test_agent_chat.py** 未调用 TypeScript SDK，仅用 Python 复现 `llm.ts` 的 Reason/Judge 语义。
 - **client_http.py** 通过 HTTP 调用 Node 封装的 SDK 服务，会跑完整 Agent 循环（Collect、Loop、Harness 等）。
 - 也可直接运行 Node 示例：`cd agent-runtime-core && npm run example`。
