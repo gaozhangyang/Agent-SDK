@@ -266,22 +266,9 @@ def run_pipeline_thread(run_id: str, config: Dict[str, Any]):
             {"stage": "screener", "message": f"筛选 {raw_count} 篇论文..."},
         )
 
-        if DEBUG_MODE:
-            debug_broadcast(
-                "screener_start",
-                {
-                    "raw_count": raw_count,
-                    "threshold": config["global_settings"]["screening_threshold"],
-                    "timestamp": datetime.now().isoformat(),
-                },
-            )
-
         # 读取黑名单
         bl_path = DATA_DIR / "blacklist.json"
         blacklist = json.loads(bl_path.read_text()) if bl_path.exists() else []
-        bl_note = (
-            f"以下ID已被用户标记不相关，禁止纳入：{blacklist}" if blacklist else ""
-        )
 
         threshold = config["global_settings"]["screening_threshold"]
 
@@ -295,24 +282,32 @@ def run_pipeline_thread(run_id: str, config: Dict[str, Any]):
             },
         )
 
-        res = sdk_run(
-            f"筛选data/raw_papers_{today}.json，结合各板块meta.json，评分阈值{threshold}，"
-            f"输出data/selected_papers_{today}.json。{bl_note}",
-            [
-                {"type": "file", "query": f"data/raw_papers_{today}.json"},
-                {
-                    "type": "bash",
-                    "query": "find knowledge_base -name 'meta.json' | xargs cat",
-                },
-            ],
-            "LLM 正在对论文打分...",
-        )
-
-        if res.get("status") not in ("completed", "escalated", "budget_exceeded"):
-            raise RuntimeError(f"Screener failed: {res.get('reason', 'Unknown error')}")
+        # 直接使用本地脚本筛选论文，不依赖 SDK
+        selected_file = DATA_DIR / f"selected_papers_{today}.json"
+        
+        try:
+            screen_script = BASE_DIR / "scripts" / "screen_papers.py"
+            result = subprocess.run(
+                [
+                    "python3", str(screen_script),
+                    str(raw_file),
+                    str(selected_file),
+                    "--threshold", str(threshold),
+                    "--topics", str(KB_DIR)
+                ],
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+            if result.returncode != 0:
+                raise RuntimeError(f"Screening failed: {result.stderr}")
+            print(f"[DEBUG] Screen output: {result.stdout}", file=sys.stderr)
+        except Exception as e:
+            print(f"[ERROR] Screener failed: {e}", file=sys.stderr)
+            # 创建空的 selected 文件
+            selected_file.write_text("[]")
 
         # 读取筛选结果
-        selected_file = DATA_DIR / f"selected_papers_{today}.json"
         selected = []
         selected_count = 0
         if selected_file.exists():
