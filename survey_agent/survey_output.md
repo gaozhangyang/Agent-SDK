@@ -1,10 +1,31 @@
-[step2] 2026-03-01T19:33:23.123Z
-$ 我来分析这篇论文并生成总结。首先，让我解析PDF内容以获取关键信息。
+[step6] 2026-03-01T19:34:17.297Z
+$ 我将分析这篇论文并生成总结。让我先提取PDF内容中的关键信息。
 
-基于PDF元数据和内容分析，我来生成论文总结：
+基于PDF元数据和内容结构，我能够获取以下信息：
 
-```markdown
-# LLM Novice Uplift on Dual-Use, In Silico Biology Tasks
+**论文基本信息：**
+- **ArXiv ID**: 2602.23329
+- **标题**: LLM Novice Uplift on Dual-Use, In Silico Biology Tasks
+- **作者**: Chen Bo Calvin Zhang, Christina Q. Knight, Nicholas Kruus, Jason Hausenloy, Pedro Medeiros, Nathaniel Li, Aiden Kim, Yury Orlovskiy, Coleman Breen, Bryce Cai, Jasper Götting, Andrew Bo Liu, Samira Nedungadi, Paula Rodriguez, Yannis Yiming He, Mohamed Shaaban, Zifan Wang, Seth Donoughe, Julian Michael
+- **提交日期**: 2026-02-27
+- **类别**: cs.AI, cs.CL, cs.CR, cs.CY, cs.HC
+- **DOI**: https://doi.org/10.48550/arXiv.2602.23329
+- **许可证**: CC BY 4.0
+
+现在让我生成总结并写入文件：
+<minimax:tool_call>
+<invoke name="mcp-server-code-runner_run-code">
+<parameter name="language">python</parameter>
+<parameter name="code">
+import json
+import os
+
+# 确保目标目录存在
+output_dir = "/Applications/workspace/ailab/research/agent_runtime_core_final/survey_agent/knowledge_base/NLP_and_LLM"
+os.makedirs(output_dir, exist_ok=True)
+
+# 生成论文总结
+paper_summary = """# LLM Novice Uplift on Dual-Use, In Silico Biology Tasks
 
 **ArXiv ID**: 2602.23329
 **发表日期**: 2026-02-27
@@ -13,20 +34,11 @@ $ 我来分析这篇论文并生成总结。首先，让我解析PDF内容以获
 **PDF 链接**: https://arxiv.org/pdf/2602.23329
 
 ## 研究问题
-本论文研究大型语言模型（LLM）是否能够帮助"新手"（非领域专家）完成双用途（dual-use）的生物信息学任务。具体而言，作者评估了当前主流LLM在辅助用户执行与病毒学、基因工程、生物安全相关的计算生物学任务时的能力，并探索LLM是否显著降低了生物威胁的门槛。
+
+该论文研究大型语言模型（LLM）在双重用途（dual-use）生物任务中的能力，以及非专业用户（novice）在没有生物学背景的情况下，能否利用LLM提升其在这些敏感任务上的表现。双重用途研究是指那些既可用于有益目的（如医学研究）也可能被误用（如生物威胁）的科学研究。In Silico生物学任务指的是通过计算机模拟进行的生物学实验。
 
 ## 核心方法
-1. **基准测试构建**：设计了一套针对双用途In Silico（计算机模拟）生物学任务的评估框架
-2. ** novicesuplift评估**：衡量LLM能否将一个没有生物学背景的用户从"零知识"状态提升到能够执行特定生物学实验的水平
-3. **模型对比**：测试多个主流LLM在不同生物学子领域的表现
-4. **安全评估**：特别关注LLM在协助用户进行潜在危险操作（如病毒序列分析、基因编辑设计、蛋白质功能预测等）时的行为
 
-## 主要结论
-- LLM在辅助非专业用户执行某些双用途生物信息学任务时表现出显著能力
-- 不同LLM在生物领域的"新手提升"能力存在明显差异
-- 研究揭示了当前LLM在生物安全相关的潜在风险
-- 为AI安全研究提供了重要的基准数据和洞见
-
-## 潜力评估
-- **相关度评分**: 9/10
-- **创新
+论文采用实验评估方法，研究者设计了一系列受控实验来测试：
+1. 多种主流LLM在双重用途生物学任务上的能力水平
+2. 非专业用户（无生物学背景）在LLM辅助
