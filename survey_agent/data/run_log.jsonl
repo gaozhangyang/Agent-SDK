@@ -4,3 +4,4 @@
 {"run_id": "run_20260302_015053", "date": "2026-03-02", "status": "completed", "summary": {"fetched": 0, "selected": 0, "analyzed": 0, "failed": 0}, "started_at": "2026-03-02T01:50:53.203846", "finished_at": "2026-03-02T01:54:47.033224"}
 {"run_id": "run_20260302_015744", "date": "2026-03-02", "status": "completed", "summary": {"fetched": 0, "selected": 0, "analyzed": 0, "failed": 0}, "started_at": "2026-03-02T01:57:44.035556", "finished_at": "2026-03-02T02:03:02.750527"}
 {"run_id": "run_20260302_021648", "date": "2026-03-02", "status": "completed", "summary": {"fetched": 100, "selected": 0, "analyzed": 0, "failed": 0}, "started_at": "2026-03-02T02:16:48.312846", "finished_at": "2026-03-02T02:17:41.328923"}
+{"run_id": "run_20260302_025037", "date": "2026-03-02", "status": "completed", "summary": {"fetched": 100, "selected": 51, "analyzed": 50, "failed": 1}, "started_at": "2026-03-02T02:50:37.521708", "finished_at": "2026-03-02T06:09:21.295176"}
