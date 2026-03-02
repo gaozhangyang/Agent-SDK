@@ -8,14 +8,20 @@
     "build": "tsc --noEmit",
     "test": "jest --testPathPattern=tests/",
     "test:coverage": "jest --coverage",
-    "example": "ts-node example/run.ts"
+    "example": "ts-node example/run.ts",
+    "start:server": "ts-node src/server/index.ts"
   },
   "keywords": ["agent", "runtime", "sdk"],
   "license": "MIT",
-  "dependencies": {},
+  "dependencies": {
+    "express": "^4.18.2",
+    "node-fetch": "^2.7.0"
+  },
   "devDependencies": {
+    "@types/express": "^4.17.21",
     "@types/jest": "^29.5.0",
     "@types/node": "^20.0.0",
+    "@types/node-fetch": "^2.6.11",
     "jest": "^29.5.0",
     "ts-jest": "^29.1.0",
     "ts-node": "^10.9.0",

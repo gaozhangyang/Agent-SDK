@@ -61,8 +61,8 @@
     "llm": {
       "baseUrl": "http://35.220.164.252:3888/v1",
       "model": "MiniMax-M2.5",
-      "apiKey": "sk-OzRhb0LmlrVf5UBy5WI6xenpKyEEGUl94kDbJcFvSgCI2sq9"
+      "apiKey": "sk-GZlfkTrS1BStAtfSLBM94NL6L2MiBrQOCz39c4jXQ4H5jMzG"
     },
-    "sdk_url": "http://127.0.0.1:3889"
+    "sdk_url": "http://127.0.0.1:3890"
   }
 }

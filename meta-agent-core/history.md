@@ -149,3 +149,7 @@ Ran all test suites.
 ### 测试结果：
 - **通过**: 94/94 (100%)
 - **覆盖率**: ~80%
+
+
+opencode run "survey_agent之前用的agent后端server是agent-runtime-core， 现在我想用meta-agent-core的服务取代agent-runtime-core，帮我严格测试一下，如果代码有bug则帮我修复"
+
