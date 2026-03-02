@@ -1,0 +1,24 @@
+{
+  "name": "meta-agent-core",
+  "version": "2.0.0",
+  "description": "Meta Agent Runtime Core SDK v2",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc --noEmit",
+    "test": "jest --testPathPattern=tests/",
+    "test:coverage": "jest --coverage",
+    "example": "ts-node example/run.ts"
+  },
+  "keywords": ["agent", "runtime", "sdk"],
+  "license": "MIT",
+  "dependencies": {},
+  "devDependencies": {
+    "@types/jest": "^29.5.0",
+    "@types/node": "^20.0.0",
+    "jest": "^29.5.0",
+    "ts-jest": "^29.1.0",
+    "ts-node": "^10.9.0",
+    "typescript": "^5.0.0"
+  }
+}
