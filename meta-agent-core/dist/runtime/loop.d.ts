@@ -1,6 +1,7 @@
 import { type CollectConfig } from '../core/collect';
 import { LLMCall } from '../core/llm';
 import { Trace, TerminalLog } from '../core/trace';
+import { Memory } from '../core/memory';
 import { Harness } from './harness';
 import { type AgentState, type Mode } from './state';
 import { InterruptChannel, type InterruptSignal, type UserDirective } from './interrupt';
@@ -27,6 +28,7 @@ export type LoopDeps = {
     llm: LLMCall;
     trace: Trace;
     terminalLog: TerminalLog;
+    memory: Memory;
     harness: Harness;
     interrupt: InterruptChannel;
     stateManager: StateManager;

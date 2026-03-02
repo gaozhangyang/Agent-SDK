@@ -23,16 +23,16 @@
         <div class='clearfix'>
             
             <div class='fl pad1y space-right2'>
-                <span class="strong">48.42% </span>
+                <span class="strong">47.82% </span>
                 <span class="quiet">Statements</span>
-                <span class='fraction'>77/159</span>
+                <span class='fraction'>77/161</span>
             </div>
         
             
             <div class='fl pad1y space-right2'>
-                <span class="strong">47.88% </span>
+                <span class="strong">45.33% </span>
                 <span class="quiet">Branches</span>
-                <span class='fraction'>34/71</span>
+                <span class='fraction'>34/75</span>
             </div>
         
             
@@ -44,9 +44,9 @@
         
             
             <div class='fl pad1y space-right2'>
-                <span class="strong">49.04% </span>
+                <span class="strong">48.42% </span>
                 <span class="quiet">Lines</span>
-                <span class='fraction'>77/157</span>
+                <span class='fraction'>77/159</span>
             </div>
         
             
@@ -467,19 +467,40 @@
 <a name='L402'></a><a href='#L402'>402</a>
 <a name='L403'></a><a href='#L403'>403</a>
 <a name='L404'></a><a href='#L404'>404</a>
-<a name='L405'></a><a href='#L405'>405</a></td><td class="line-coverage quiet"><span class="cline-any cline-neutral">&nbsp;</span>
+<a name='L405'></a><a href='#L405'>405</a>
+<a name='L406'></a><a href='#L406'>406</a>
+<a name='L407'></a><a href='#L407'>407</a>
+<a name='L408'></a><a href='#L408'>408</a>
+<a name='L409'></a><a href='#L409'>409</a>
+<a name='L410'></a><a href='#L410'>410</a>
+<a name='L411'></a><a href='#L411'>411</a>
+<a name='L412'></a><a href='#L412'>412</a>
+<a name='L413'></a><a href='#L413'>413</a>
+<a name='L414'></a><a href='#L414'>414</a>
+<a name='L415'></a><a href='#L415'>415</a>
+<a name='L416'></a><a href='#L416'>416</a>
+<a name='L417'></a><a href='#L417'>417</a>
+<a name='L418'></a><a href='#L418'>418</a>
+<a name='L419'></a><a href='#L419'>419</a>
+<a name='L420'></a><a href='#L420'>420</a>
+<a name='L421'></a><a href='#L421'>421</a>
+<a name='L422'></a><a href='#L422'>422</a>
+<a name='L423'></a><a href='#L423'>423</a>
+<a name='L424'></a><a href='#L424'>424</a></td><td class="line-coverage quiet"><span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-yes">2x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">2x</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-yes">2x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">2x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -806,6 +827,23 @@
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
@@ -876,6 +914,7 @@
 import { collect, type CollectConfig } from '../core/collect';
 import { LLMCall } from '../core/llm';
 import { Trace, TerminalLog } from '../core/trace';
+import { Memory } from '../core/memory';
 import { Harness } from './harness';
 import { canTransition, type AgentState, type Mode } from './state';
 import { InterruptChannel, type InterruptSignal, type UserDirective } from './interrupt';
@@ -906,6 +945,7 @@ export type LoopDeps = {
   llm: LLMCall;
   trace: Trace;
   terminalLog: TerminalLog;
+  memory: Memory;
   harness: Harness;
   interrupt: InterruptChannel;
   stateManager: StateManager;
@@ -1210,6 +1250,23 @@ export async function runLoop(
 &nbsp;
       // 子目标完成，添加到 archivedSubgoals
 <span class="cstat-no" title="statement not covered" >      <span class="missing-if-branch" title="if path not taken" >I</span>if (state.currentSubgoal) {</span>
+        // 写入 Memory（长期记忆）：记录用户请求 + 解决结论
+<span class="cstat-no" title="statement not covered" >        deps.memory.append({</span>
+          userRequest: state.currentSubgoal,
+          solutionSummary: String(state.custom['pendingProposal'] ?? ''),
+          archivedSubgoal: state.currentSubgoal,
+        });
+        
+        // 在 Trace 中追加 narrative 标记这次记忆更新
+<span class="cstat-no" title="statement not covered" >        deps.trace.append({</span>
+          ts: Date.now(),
+          kind: 'narrative',
+          data: { 
+            message: `子目标已完成: ${state.currentSubgoal}`,
+            solution: String(state.custom['pendingProposal'] ?? '').slice(0, 100),
+          },
+        });
+        
 <span class="cstat-no" title="statement not covered" >        state.archivedSubgoals.push(state.currentSubgoal);</span>
 <span class="cstat-no" title="statement not covered" >        state.subgoals = state.subgoals.filter(<span class="fstat-no" title="function not covered" >g </span>=&gt; <span class="cstat-no" title="statement not covered" >g !== state.currentSubgoal)</span>;</span>
 <span class="cstat-no" title="statement not covered" >        state.currentSubgoal = state.subgoals[0] ?? null;</span>
@@ -1282,7 +1339,7 @@ export async function runLoop(
             <div class='footer quiet pad2 space-top1 center small'>
                 Code coverage generated by
                 <a href="https://istanbul.js.org/" target="_blank" rel="noopener noreferrer">istanbul</a>
-                at 2026-03-02T11:25:30.930Z
+                at 2026-03-02T13:29:03.958Z
             </div>
         <script src="../../prettify.js"></script>
         <script>

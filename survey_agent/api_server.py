@@ -96,7 +96,7 @@ def load_config() -> Dict[str, Any]:
         return {
             "topics": [],
             "global_settings": {
-                "fetch_max_papers": 100,
+                "fetch_max_papers": 5,
                 "screening_threshold": 7.0,
                 "schedule_utc_hour": 8,
                 "debug": False,

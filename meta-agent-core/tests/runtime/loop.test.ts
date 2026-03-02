@@ -5,6 +5,7 @@ import { createInitialState } from '../../src/runtime/state';
 import { LLMCall, LLMProvider } from '../../src/core/llm';
 import { localPrimitives } from '../../src/core/primitives';
 import { Trace, TerminalLog } from '../../src/core/trace';
+import { Memory } from '../../src/core/memory';
 import { Harness } from '../../src/runtime/harness';
 import { InterruptChannel } from '../../src/runtime/interrupt';
 import { StateManager } from '../../src/runtime/state';
@@ -19,6 +20,7 @@ describe('Loop', () => {
   let llm: LLMCall;
   let trace: Trace;
   let terminalLog: TerminalLog;
+  let memory: Memory;
   let harness: Harness;
   let interrupt: InterruptChannel;
   let stateManager: StateManager;
@@ -39,6 +41,7 @@ describe('Loop', () => {
     };
 
     terminalLog = new TerminalLog();
+    memory = new Memory();
     primitives = localPrimitives(tempDir, terminalLog);
     llm = new LLMCall(mockProvider);
     trace = new Trace();
@@ -67,6 +70,7 @@ describe('Loop', () => {
       llm,
       trace,
       terminalLog,
+      memory,
       harness,
       interrupt,
       stateManager,
@@ -95,6 +99,7 @@ describe('Loop', () => {
       llm,
       trace,
       terminalLog,
+      memory,
       harness,
       interrupt,
       stateManager,
@@ -120,6 +125,7 @@ describe('Loop', () => {
       llm,
       trace,
       terminalLog,
+      memory,
       harness,
       interrupt,
       stateManager,
@@ -155,6 +161,7 @@ describe('Loop', () => {
       llm,
       trace,
       terminalLog,
+      memory,
       harness,
       interrupt,
       stateManager,
@@ -199,6 +206,7 @@ describe('Loop', () => {
       llm,
       trace,
       terminalLog,
+      memory,
       harness,
       interrupt,
       stateManager,
@@ -231,6 +239,7 @@ describe('Loop', () => {
       llm,
       trace,
       terminalLog,
+      memory,
       harness,
       interrupt,
       stateManager,
@@ -275,6 +284,7 @@ describe('Loop', () => {
       llm,
       trace,
       terminalLog,
+      memory,
       harness,
       interrupt,
       stateManager,
@@ -312,6 +322,7 @@ describe('Loop', () => {
       llm,
       trace,
       terminalLog,
+      memory,
       harness,
       interrupt,
       stateManager,

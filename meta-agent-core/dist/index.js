@@ -4,7 +4,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.createErrorClassifier = exports.createPermissionHooks = exports.createModeHooks = exports.InterruptChannel = exports.StateManager = exports.createInitialState = exports.canTransition = exports.runLoop = exports.Harness = exports.TerminalLog = exports.Trace = exports.collect = exports.LLMCall = void 0;
+exports.createErrorClassifier = exports.createPermissionHooks = exports.createModeHooks = exports.InterruptChannel = exports.StateManager = exports.createInitialState = exports.canTransition = exports.runLoop = exports.Harness = exports.Memory = exports.TerminalLog = exports.Trace = exports.collect = exports.LLMCall = void 0;
 exports.createMetaAgent = createMetaAgent;
 const path_1 = __importDefault(require("path"));
 const promises_1 = __importDefault(require("fs/promises"));
@@ -16,6 +16,8 @@ Object.defineProperty(exports, "collect", { enumerable: true, get: function () {
 const trace_1 = require("./core/trace");
 Object.defineProperty(exports, "Trace", { enumerable: true, get: function () { return trace_1.Trace; } });
 Object.defineProperty(exports, "TerminalLog", { enumerable: true, get: function () { return trace_1.TerminalLog; } });
+const memory_1 = require("./core/memory");
+Object.defineProperty(exports, "Memory", { enumerable: true, get: function () { return memory_1.Memory; } });
 const harness_1 = require("./runtime/harness");
 Object.defineProperty(exports, "Harness", { enumerable: true, get: function () { return harness_1.Harness; } });
 const loop_1 = require("./runtime/loop");
@@ -36,11 +38,13 @@ async function createMetaAgent(projectPath, goal, llmProvider, options) {
     // 1. 创建 .agent/ 目录
     const agentDir = path_1.default.join(projectPath, '.agent');
     await promises_1.default.mkdir(agentDir, { recursive: true });
-    // 2. 初始化 Trace 和 TerminalLog
+    // 2. 初始化 Trace、TerminalLog 和 Memory
     const traceLogPath = options?.logToFile ? path_1.default.join(agentDir, 'trace.jsonl') : undefined;
     const terminalLogPath = options?.logToFile ? path_1.default.join(agentDir, 'terminal.jsonl') : undefined;
+    const memoryLogPath = options?.logToFile ? path_1.default.join(agentDir, 'memory.jsonl') : undefined;
     const trace = new trace_1.Trace(traceLogPath);
     const terminalLog = new trace_1.TerminalLog(terminalLogPath);
+    const memory = new memory_1.Memory(memoryLogPath);
     // 3. 用 localPrimitives 创建原语
     // coreDir 为当前 SDK 的 src/ 目录绝对路径
     const coreDir = path_1.default.resolve(__dirname, '..');
@@ -85,6 +89,7 @@ async function createMetaAgent(projectPath, goal, llmProvider, options) {
         llm,
         trace,
         terminalLog,
+        memory,
         harness,
         interrupt,
         stateManager,
@@ -105,6 +110,7 @@ async function createMetaAgent(projectPath, goal, llmProvider, options) {
         getState: () => state,
         getTrace: () => trace,
         getTerminalLog: () => terminalLog,
+        getMemory: () => memory,
     };
 }
 //# sourceMappingURL=index.js.map

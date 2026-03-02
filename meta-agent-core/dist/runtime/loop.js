@@ -254,6 +254,21 @@ async function runLoop(state, config, deps, hooks) {
             }
             // 子目标完成，添加到 archivedSubgoals
             if (state.currentSubgoal) {
+                // 写入 Memory（长期记忆）：记录用户请求 + 解决结论
+                deps.memory.append({
+                    userRequest: state.currentSubgoal,
+                    solutionSummary: String(state.custom['pendingProposal'] ?? ''),
+                    archivedSubgoal: state.currentSubgoal,
+                });
+                // 在 Trace 中追加 narrative 标记这次记忆更新
+                deps.trace.append({
+                    ts: Date.now(),
+                    kind: 'narrative',
+                    data: {
+                        message: `子目标已完成: ${state.currentSubgoal}`,
+                        solution: String(state.custom['pendingProposal'] ?? '').slice(0, 100),
+                    },
+                });
                 state.archivedSubgoals.push(state.currentSubgoal);
                 state.subgoals = state.subgoals.filter(g => g !== state.currentSubgoal);
                 state.currentSubgoal = state.subgoals[0] ?? null;

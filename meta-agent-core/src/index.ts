@@ -6,6 +6,7 @@ import { localPrimitives, type Primitives } from './core/primitives';
 import { LLMCall, type LLMProvider, type JudgeType, type LLMCallResult, type LLMCallMulti } from './core/llm';
 import { collect, type CollectConfig, type CollectSource, type CollectResult } from './core/collect';
 import { Trace, TerminalLog, type TraceEntry, type TerminalEntry, type Confidence, type Uncertainty } from './core/trace';
+import { Memory, type MemoryEntry } from './core/memory';
 import { Harness } from './runtime/harness';
 import { runLoop, type LoopConfig, type LoopResult, type LoopHooks, type LoopDeps } from './runtime/loop';
 import { StateManager, canTransition, createInitialState, type AgentState, type PermissionLevel, type Mode } from './runtime/state';
@@ -21,6 +22,7 @@ export { type Primitives };
 export { LLMCall, type LLMProvider, type JudgeType, type LLMCallResult, type LLMCallMulti };
 export { collect, type CollectConfig, type CollectSource, type CollectResult };
 export { Trace, TerminalLog, type TraceEntry, type TerminalEntry, type Confidence, type Uncertainty };
+export { Memory, type MemoryEntry };
 export { Harness };
 export { runLoop, type LoopConfig, type LoopResult, type LoopHooks, type LoopDeps };
 export { canTransition, createInitialState, type AgentState, type PermissionLevel, type Mode };
@@ -40,6 +42,7 @@ export interface MetaAgent {
   getState(): AgentState;
   getTrace(): Trace;
   getTerminalLog(): TerminalLog;
+  getMemory(): Memory;
 }
 
 export async function createMetaAgent(
@@ -58,12 +61,14 @@ export async function createMetaAgent(
   const agentDir = path.join(projectPath, '.agent');
   await fs.mkdir(agentDir, { recursive: true });
 
-  // 2. 初始化 Trace 和 TerminalLog
+  // 2. 初始化 Trace、TerminalLog 和 Memory
   const traceLogPath = options?.logToFile ? path.join(agentDir, 'trace.jsonl') : undefined;
   const terminalLogPath = options?.logToFile ? path.join(agentDir, 'terminal.jsonl') : undefined;
+  const memoryLogPath = options?.logToFile ? path.join(agentDir, 'memory.jsonl') : undefined;
   
   const trace = new Trace(traceLogPath);
   const terminalLog = new TerminalLog(terminalLogPath);
+  const memory = new Memory(memoryLogPath);
 
   // 3. 用 localPrimitives 创建原语
   // coreDir 为当前 SDK 的 src/ 目录绝对路径
@@ -73,6 +78,7 @@ export async function createMetaAgent(
   // 4. 用 StateManager 尝试恢复 State，失败则 createInitial
   const stateManager = new StateManager();
   let state = await stateManager.load(agentDir);
+  const isResumed = state !== null;
   
   if (!state) {
     state = stateManager.createInitial(goal, options?.permissions ?? 2);
@@ -81,6 +87,12 @@ export async function createMetaAgent(
       state.currentSubgoal = options.subgoals[0] ?? null;
     }
     await stateManager.save(agentDir, state);
+  } else {
+    // Session 恢复：加载累积的 Trace、TerminalLog 和 Memory
+    // 这样可以继续之前的序列号，保证日志的连续性
+    if (traceLogPath) await trace.loadFromFile();
+    if (terminalLogPath) await terminalLog.loadFromFile();
+    if (memoryLogPath) await memory.loadFromFile();
   }
 
   // 5. 组合标准 hooks：createModeHooks() + createPermissionHooks() + createErrorClassifier()
@@ -115,6 +127,7 @@ export async function createMetaAgent(
     llm,
     trace,
     terminalLog,
+    memory,
     harness,
     interrupt,
     stateManager,
@@ -138,5 +151,6 @@ export async function createMetaAgent(
     getState: (): AgentState => state!,
     getTrace: (): Trace => trace,
     getTerminalLog: (): TerminalLog => terminalLog,
+    getMemory: (): Memory => memory,
   };
 }

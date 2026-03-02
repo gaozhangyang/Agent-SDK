@@ -21,11 +21,12 @@
 
 解决问题的过程，就是把一本书写好的过程。这本书就是 **agent 的推理轨迹**（Trace）——记录所有思考、工具调用、中间结果与质量信号。书是线性的，但可以在任意位置触发新的 LLM 调用来展开子问题，这个过程允许递归。
 
-Trace 只是推理日志，不等于全部状态。完整的 agent 运行时有**四个**不同性质的信息对象：
+Trace 只是推理日志，不等于全部状态。完整的 agent 运行时有**五个**不同性质的信息对象：
 
 ```
 Trace          → 发生过什么（推理书：思考、判断、confidence、uncertainty）
 Terminal Log   → 执行了什么（终端：命令原文、stdout、stderr、退出码、耗时）
+Memory         → 长期记忆（用户请求 + 解决结论，结构化记录）
 State          → 现在是什么状态（结构化 KV：目标、子目标、当前模式、权限级别、版本号）
 Workspace      → 外部世界的当前事实（优先读取可稳定复现的事实；运行时环境按需读取，
                  可靠性较低，在 confidence.by_source 中显式标注）
@@ -164,6 +165,7 @@ type TerminalEntry = {
 │   ├── state.json          # 上次运行结束时的 State 快照（Session 恢复入口）
 │   ├── trace.jsonl         # 累积的推理轨迹（追加写，跨 Session）
 │   ├── terminal.jsonl      # 累积的终端日志（追加写，跨 Session）
+│   ├── memory.jsonl        # 长期记忆（用户请求 + 解决结论，追加写，跨 Session）
 │   └── sessions/           # 每次运行的摘要索引（便于历史检索）
 ├── AGENTS.md               # 静态上下文（提交到 Git，团队共享）
 └── [项目源代码]
@@ -172,10 +174,35 @@ type TerminalEntry = {
 `.agent/` 目录加入项目的 `.gitignore`，由自身的追加写机制管理，不受 git 管理。
 
 **Session 恢复逻辑：** 启动时检测 `.agent/state.json` 是否存在：
-- 存在 → 恢复 State，从上次的 `currentSubgoal` 继续，Trace 和 Terminal Log 追加写
+- 存在 → 恢复 State，从上次的 `currentSubgoal` 继续，Trace、Terminal Log 和 Memory 追加写
 - 不存在 → 全新初始化，创建 `.agent/` 目录结构
 
-### 核心层 5：上下文编排协议 Collect
+**HTTP API Session 恢复：** SDK 服务器端通过 Agent 缓存（按 `workDir` 索引）实现跨 HTTP 请求的 Session 保持：
+- 同一个 `workDir` 的多次 `/run` 请求会共享同一个 Agent 实例
+- Trace、Terminal Log、Memory 在首次请求时从 `.agent/` 目录加载，后续追加写
+- 序列号（seq）跨请求连续递增，确保日志可追溯
+- 支持 `resume=true/false` 参数控制是否恢复之前的 Session
+
+### 核心层 5：Memory 长期记忆
+
+```
+Memory → { entries: MemoryEntry[] }
+MemoryEntry = { ts, userRequest, solutionSummary, sessionId?, archivedSubgoal? }
+```
+
+Memory 是**结构化长期记忆**，与 Trace 分开维护，专门存储"用户请求 + 解决结论"的结构化记录：
+
+- **存储格式**：每条记录包含 `userRequest`（用户原始请求）+ `solutionSummary`（解决方案总结）
+- **写入时机**：子目标真正完成后，由 Loop 统一写一条总结记录
+- **Trace 标记**：每次 Memory 写入时，在 Trace 中追加一条 `kind: 'narrative'` 标记这次记忆更新
+- **检索接口**：`search(query)` 按关键词检索，`recent(n)` 获取最近的 N 条记录
+- **Collect 集成**：`Collect` 可以把 Memory 作为一个受控 source 注入上下文（带上 `coverage/reliability/by_source` 信息）
+
+```
+/projects/{agent-id}/.agent/memory.jsonl  # 追加写，跨 Session 累积
+```
+
+### 核心层 6：上下文编排协议 Collect
 
 ```
 Collect(sources, filters, limits) → { context, confidence{coverage, reliability, gaps, by_source} }
@@ -190,7 +217,7 @@ coverage 高，reliability 低  → 刷新来源或 Escalate
 coverage 低，reliability 低  → 直接 Escalate
 ```
 
-### 核心层 6：核心执行循环骨架
+### 核心层 7：核心执行循环骨架
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
