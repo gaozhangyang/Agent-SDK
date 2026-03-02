@@ -99,7 +99,7 @@
     ],
     "pdf_url": "https://arxiv.org/pdf/2602.24286",
     "abs_url": "https://arxiv.org/abs/2602.24286",
-    "relevance_score": 14.0,
+    "relevance_score": 12.0,
     "target_topic": "Reinforcement_Learning"
   },
   {
@@ -185,101 +185,6 @@
     ],
     "pdf_url": "https://arxiv.org/pdf/2602.24275",
     "abs_url": "https://arxiv.org/abs/2602.24275",
-    "relevance_score": 9.0,
-    "target_topic": "Computer_Vision"
-  },
-  {
-    "arxiv_id": "2602.24266",
-    "title": "Efficient Discovery of Approximate Causal Abstractions via Neural Mechanism Sparsification",
-    "abstract": "Neural networks are hypothesized to implement interpretable causal mechanisms, yet verifying this requires finding a causal abstraction -- a simpler, high-level Structural Causal Model (SCM) faithful to the network under interventions. Discovering such abstractions is hard: it typically demands brute-force interchange interventions or retraining. We reframe the problem by viewing structured pruning as a search over approximate abstractions. Treating a trained network as a deterministic SCM, we derive an Interventional Risk objective whose second-order expansion yields closed-form criteria for replacing units with constants or folding them into neighbors. Under uniform curvature, our score reduces to activation variance, recovering variance-based pruning as a special case while clarifying when it fails. The resulting procedure efficiently extracts sparse, intervention-faithful abstractions from pretrained networks, which we validate via interchange interventions.",
-    "authors": [
-      "Amir Asiaee"
-    ],
-    "submitted": "2026-02-27",
-    "categories": [
-      "cs.LG",
-      "cs.AI"
-    ],
-    "pdf_url": "https://arxiv.org/pdf/2602.24266",
-    "abs_url": "https://arxiv.org/abs/2602.24266",
-    "relevance_score": 7.0,
-    "target_topic": "Reinforcement_Learning"
-  },
-  {
-    "arxiv_id": "2602.24264",
-    "title": "Compositional Generalization Requires Linear, Orthogonal Representations in Vision Embedding Models",
-    "abstract": "Compositional generalization, the ability to recognize familiar parts in novel contexts, is a defining property of intelligent systems. Although modern models are trained on massive datasets, they still cover only a tiny fraction of the combinatorial space of possible inputs, raising the question of what structure representations must have to support generalization to unseen combinations. We formalize three desiderata for compositional generalization under standard training (divisibility, transferability, stability) and show they impose necessary geometric constraints: representations must decompose linearly into per-concept components, and these components must be orthogonal across concepts. This provides theoretical grounding for the Linear Representation Hypothesis: the linear structure widely observed in neural representations is a necessary consequence of compositional generalization. We further derive dimension bounds linking the number of composable concepts to the embedding geometry. Empirically, we evaluate these predictions across modern vision models (CLIP, SigLIP, DINO) and find that representations exhibit partial linear factorization with low-rank, near-orthogonal per-concept factors, and that the degree of this structure correlates with compositional generalization on unseen combinations. As models continue to scale, these conditions predict the representational geometry they may converge to. Code is available at https://github.com/oshapio/necessary-compositionality.",
-    "authors": [
-      "Arnas Uselis",
-      "Andrea Dittadi",
-      "Seong Joon Oh"
-    ],
-    "submitted": "2026-02-27",
-    "categories": [
-      "cs.CV",
-      "cs.LG"
-    ],
-    "pdf_url": "https://arxiv.org/pdf/2602.24264",
-    "abs_url": "https://arxiv.org/abs/2602.24264",
-    "relevance_score": 7.0,
-    "target_topic": "Reinforcement_Learning"
-  },
-  {
-    "arxiv_id": "2602.24262",
-    "title": "Coverage-Aware Web Crawling for Domain-Specific Supplier Discovery via a Web--Knowledge--Web Pipeline",
-    "abstract": "Identifying the full landscape of small and medium-sized enterprises (SMEs) in specialized industry sectors is critical for supply-chain resilience, yet existing business databases suffer from substantial coverage gaps -- particularly for sub-tier suppliers and firms in emerging niche markets. We propose a \\textbf{Web--Knowledge--Web (W$\\to$K$\\to$W)} pipeline that iteratively (1)~crawls domain-specific web sources to discover candidate supplier entities, (2)~extracts and consolidates structured knowledge into a heterogeneous knowledge graph, and (3)~uses the knowledge graph's topology and coverage signals to guide subsequent crawling toward under-represented regions of the supplier space. To quantify discovery completeness, we introduce a \\textbf{coverage estimation framework} inspired by ecological species-richness estimators (Chao1, ACE) adapted for web-entity populations. Experiments on the semiconductor equipment manufacturing sector (NAICS 333242) demonstrate that the W$\\to$K$\\to$W pipeline achieves the highest precision (0.138) and F1 (0.118) among all methods using the same 213-page crawl budget, building a knowledge graph of 765 entities and 586 relations while reaching peak recall by iteration~3 with only 112 pages.",
-    "authors": [
-      "Yijiashun Qi",
-      "Yijiazhen Qi",
-      "Tanmay Wagh"
-    ],
-    "submitted": "2026-02-27",
-    "categories": [
-      "cs.LG"
-    ],
-    "pdf_url": "https://arxiv.org/pdf/2602.24262",
-    "abs_url": "https://arxiv.org/abs/2602.24262",
-    "relevance_score": 8.0,
-    "target_topic": "NLP_and_LLM"
-  },
-  {
-    "arxiv_id": "2602.24254",
-    "title": "FaultXformer: A Transformer-Encoder Based Fault Classification and Location Identification model in PMU-Integrated Active Electrical Distribution System",
-    "abstract": "Accurate fault detection and localization in electrical distribution systems is crucial, especially with the increasing integration of distributed energy resources (DERs), which inject greater variability and complexity into grid operations. In this study, FaultXformer is proposed, a Transformer encoder-based architecture developed for automatic fault analysis using real-time current data obtained from phasor measurement unit (PMU). The approach utilizes time-series current data to initially extract rich temporal information in stage 1, which is crucial for identifying the fault type and precisely determining its location across multiple nodes. In Stage 2, these extracted features are processed to differentiate among distinct fault types and identify the respective fault location within the distribution system. Thus, this dual-stage transformer encoder pipeline enables high-fidelity representation learning, considerably boosting the performance of the work. The model was validated on a dataset generated from the IEEE 13-node test feeder, simulated with 20 separate fault locations and several DER integration scenarios, utilizing current measurements from four strategically located PMUs. To demonstrate robust performance evaluation, stratified 10-fold cross-validation is performed. FaultXformer achieved average accuracies of 98.76% in fault type classification and 98.92% in fault location identification across cross-validation, consistently surpassing conventional deep learning baselines convolutional neural network (CNN), recurrent neural network (RNN). long short-term memory (LSTM) by 1.70%, 34.95%, and 2.04% in classification accuracy and by 10.82%, 40.89%, and 6.27% in location accuracy, respectively. These results demonstrate the efficacy of the proposed model with significant DER penetration.",
-    "authors": [
-      "Kriti Thakur",
-      "Alivelu Manga Parimi",
-      "Mayukha Pal"
-    ],
-    "submitted": "2026-02-27",
-    "categories": [
-      "eess.SY",
-      "cs.AI",
-      "cs.LG"
-    ],
-    "pdf_url": "https://arxiv.org/pdf/2602.24254",
-    "abs_url": "https://arxiv.org/abs/2602.24254",
-    "relevance_score": 13.0,
-    "target_topic": "NLP_and_LLM"
-  },
-  {
-    "arxiv_id": "2602.24240",
-    "title": "Joint Geometric and Trajectory Consistency Learning for One-Step Real-World Super-Resolution",
-    "abstract": "Diffusion-based Real-World Image Super-Resolution (Real-ISR) achieves impressive perceptual quality but suffers from high computational costs due to iterative sampling. While recent distillation approaches leveraging large-scale Text-to-Image (T2I) priors have enabled one-step generation, they are typically hindered by prohibitive parameter counts and the inherent capability bounds imposed by teacher models. As a lightweight alternative, Consistency Models offer efficient inference but struggle with two critical limitations: the accumulation of consistency drift inherent to transitive training, and a phenomenon we term \"Geometric Decoupling\" - where the generative trajectory achieves pixel-wise alignment yet fails to preserve structural coherence. To address these challenges, we propose GTASR (Geometric Trajectory Alignment Super-Resolution), a simple yet effective consistency training paradigm for Real-ISR. Specifically, we introduce a Trajectory Alignment (TA) strategy to rectify the tangent vector field via full-path projection, and a Dual-Reference Structural Rectification (DRSR) mechanism to enforce strict structural constraints. Extensive experiments verify that GTASR delivers superior performance over representative baselines while maintaining minimal latency. The code and model will be released at https://github.com/Blazedengcy/GTASR.",
-    "authors": [
-      "Chengyan Deng",
-      "Zhangquan Chen",
-      "Li Yu",
-      "Kai Zhang",
-      "Xue Zhou",
-      "Wang Zhang"
-    ],
-    "submitted": "2026-02-27",
-    "categories": [
-      "cs.CV"
-    ],
-    "pdf_url": "https://arxiv.org/pdf/2602.24240",
-    "abs_url": "https://arxiv.org/abs/2602.24240",
     "relevance_score": 8.0,
     "target_topic": "Computer_Vision"
   }

@@ -1,11 +1,11 @@
-// [核心层 / 编排] core/collect.ts — Collect 骨架（file / bash / trace_tag）
+// [核心层 / 编排] core/collect.ts — Collect 骨架（file / bash / trace_tag / skills）
 
 import type { Primitives } from './primitives';
 import type { Confidence } from './trace';
 
 export type CollectSource = {
-  type: 'file' | 'bash' | 'trace_tag';
-  query: string;             // 文件路径 / bash 命令 / trace 标签
+  type: 'file' | 'bash' | 'trace_tag' | 'skills';
+  query: string;             // 文件路径 / bash 命令 / trace 标签 / skills 关键词
   weight?: number;           // 可信度权重，默认 1.0
 };
 
@@ -24,6 +24,7 @@ export async function collect(
   config: CollectConfig,
   primitives: Primitives,
   traceFilterFn?: (tag: string) => Array<{ data: unknown }>,
+  skillsDir?: string,  // 可选的 skills 目录路径
 ): Promise<CollectResult> {
   const parts: string[] = [];
   const bySource: Record<string, number> = {};
@@ -41,6 +42,31 @@ export async function collect(
       } else if (source.type === 'trace_tag' && traceFilterFn) {
         const entries = traceFilterFn(source.query);
         content = entries.map(e => JSON.stringify(e.data)).join('\n');
+      } else if (source.type === 'skills' && skillsDir) {
+        // skills 类型：在 skillsDir 中搜索匹配的文件
+        // query 可以是文件名（不含 .md）或完整文件名
+        try {
+          // 先尝试直接读取 query 指定的文件
+          const skillFile = source.query.endsWith('.md') 
+            ? source.query 
+            : `${source.query}.md`;
+          const skillPath = `${skillsDir}/${skillFile}`;
+          content = await primitives.read(skillPath);
+        } catch {
+          // 如果直接读取失败，使用 bash grep 搜索 skills 目录
+          const searchCmd = `ls ${skillsDir}/*.md 2>/dev/null | xargs grep -l "${source.query}" 2>/dev/null | head -3`;
+          const matchedFiles = await primitives.bash(searchCmd);
+          if (matchedFiles && matchedFiles.trim()) {
+            // 读取匹配的第一个文件
+            const firstFile = matchedFiles.split('\n')[0].trim();
+            if (firstFile) {
+              content = await primitives.read(firstFile);
+            }
+          }
+          if (!content) {
+            throw new Error(`No skill found for: ${source.query}`);
+          }
+        }
       }
 
       if (config.filters?.length) {

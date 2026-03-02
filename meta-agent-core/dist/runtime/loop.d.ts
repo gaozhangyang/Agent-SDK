@@ -33,6 +33,7 @@ export type LoopDeps = {
     interrupt: InterruptChannel;
     stateManager: StateManager;
     agentDir: string;
+    skillsDir?: string;
 };
 export type LoopConfig = {
     collectConfig: CollectConfig;

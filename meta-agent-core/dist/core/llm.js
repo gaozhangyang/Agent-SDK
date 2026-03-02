@@ -4,20 +4,30 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.LLMCall = void 0;
 class LLMCall {
     provider;
+    staticContext = ''; // 静态上下文（如 AGENT.md）
     constructor(provider) {
         this.provider = provider;
     }
+    /**
+     * 设置静态上下文（如 AGENT.md 内容）
+     * 静态上下文会在每次 LLMCall 时自动注入
+     */
+    setStaticContext(context) {
+        this.staticContext = context;
+    }
     // Reason：发散生成提案
     async reason(context, input) {
+        const staticCtx = this.staticContext ? `\n\n## 静态上下文（AGENT.md）\n${this.staticContext}\n` : '';
         const system = `你是一个编码 Agent。请根据 context 完成任务，并在末尾以 JSON 输出：
-{"result": "...", "uncertainty": {"score": 0-1, "reasons": []}}`;
+{"result": "...", "uncertainty": {"score": 0-1, "reasons": []}}${staticCtx}`;
         const raw = await this.provider.complete(system, `Context:\n${context}\n\nTask:\n${input}`);
         return this.parseWithUncertainty(raw);
     }
     // Reason（多候选）：uncertainty 高时使用
     async reasonMulti(context, input, n = 3) {
+        const staticCtx = this.staticContext ? `\n\n## 静态上下文（AGENT.md）\n${this.staticContext}\n` : '';
         const system = `你是一个编码 Agent。请生成 ${n} 个候选方案，每个方案独立可用。
-以 JSON 输出：{"candidates": ["方案1", "方案2", ...], "uncertainty": {"score": 0-1, "reasons": []}}`;
+以 JSON 输出：{"candidates": ["方案1", "方案2", ...], "uncertainty": {"score": 0-1, "reasons": []}}${staticCtx}`;
         const raw = await this.provider.complete(system, `Context:\n${context}\n\nTask:\n${input}`);
         const parsed = JSON.parse(this.extractJson(raw));
         return {
@@ -38,9 +48,10 @@ class LLMCall {
             selection: '从多个候选方案中选出最优（选项编号 + 理由）',
             capability: '判断任务是否在 agent 能力和权限范围内（完全可行/部分可行/不可行 + 理由）',
         };
+        const staticCtx = this.staticContext ? `\n\n## 静态上下文（AGENT.md）\n${this.staticContext}\n` : '';
         const system = `你是一个裁决 Agent。任务类型：${typeDescriptions[type]}。
 请给出明确结论，并在末尾以 JSON 输出：
-{"decision": "...", "uncertainty": {"score": 0-1, "reasons": []}}`;
+{"decision": "...", "uncertainty": {"score": 0-1, "reasons": []}}${staticCtx}`;
         const raw = await this.provider.complete(system, `Context:\n${context}\n\nInput:\n${input}`);
         return this.parseWithUncertainty(raw);
     }

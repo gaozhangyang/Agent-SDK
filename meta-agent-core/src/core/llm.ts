@@ -2,8 +2,9 @@
 
 import type { Uncertainty } from './trace';
 
-export type JudgeType = 'outcome' | 'risk' | 'selection' | 'capability';
-// v2 新增 'capability'，用于启动时的能力边界声明
+export type JudgeType = 'outcome' | 'risk' | 'selection' | 'milestone' | 'capability';
+// v2: 'capability' 用于启动时的能力边界声明
+// v2: 'milestone' 用于判断当前完成点是否值得一个 git commit
 
 export type LLMCallResult = {
   result: string;
@@ -20,20 +21,32 @@ export interface LLMProvider {
 }
 
 export class LLMCall {
+  private staticContext: string = '';  // 静态上下文（如 AGENT.md）
+
   constructor(private provider: LLMProvider) {}
+
+  /**
+   * 设置静态上下文（如 AGENT.md 内容）
+   * 静态上下文会在每次 LLMCall 时自动注入
+   */
+  setStaticContext(context: string): void {
+    this.staticContext = context;
+  }
 
   // Reason：发散生成提案
   async reason(context: string, input: string): Promise<LLMCallResult> {
+    const staticCtx = this.staticContext ? `\n\n## 静态上下文（AGENT.md）\n${this.staticContext}\n` : '';
     const system = `你是一个编码 Agent。请根据 context 完成任务，并在末尾以 JSON 输出：
-{"result": "...", "uncertainty": {"score": 0-1, "reasons": []}}`;
+{"result": "...", "uncertainty": {"score": 0-1, "reasons": []}}${staticCtx}`;
     const raw = await this.provider.complete(system, `Context:\n${context}\n\nTask:\n${input}`);
     return this.parseWithUncertainty(raw);
   }
 
   // Reason（多候选）：uncertainty 高时使用
   async reasonMulti(context: string, input: string, n = 3): Promise<LLMCallMulti> {
+    const staticCtx = this.staticContext ? `\n\n## 静态上下文（AGENT.md）\n${this.staticContext}\n` : '';
     const system = `你是一个编码 Agent。请生成 ${n} 个候选方案，每个方案独立可用。
-以 JSON 输出：{"candidates": ["方案1", "方案2", ...], "uncertainty": {"score": 0-1, "reasons": []}}`;
+以 JSON 输出：{"candidates": ["方案1", "方案2", ...], "uncertainty": {"score": 0-1, "reasons": []}}${staticCtx}`;
     const raw = await this.provider.complete(system, `Context:\n${context}\n\nTask:\n${input}`);
     const parsed = JSON.parse(this.extractJson(raw));
     return {
@@ -45,7 +58,7 @@ export class LLMCall {
   // Judge：收敛裁决，必须显式指定 type
   async judge(type: JudgeType, context: string, input: string): Promise<LLMCallResult> {
     // 非法 type 立即抛出错误
-    const validTypes: JudgeType[] = ['outcome', 'risk', 'selection', 'capability'];
+    const validTypes: JudgeType[] = ['outcome', 'risk', 'selection', 'milestone', 'capability'];
     if (!validTypes.includes(type)) {
       throw new Error(`judge: unknown type "${type}"`);
     }
@@ -54,12 +67,14 @@ export class LLMCall {
       outcome: '判断子目标是否达成（是/否 + 理由）',
       risk: '判断操作是否允许执行，权限是否满足（通过/拒绝 + 理由）',
       selection: '从多个候选方案中选出最优（选项编号 + 理由）',
+      milestone: '判断当前完成点是否值得一个 git commit（是/否 + 理由）：判断标准：1. 当前完成点是否可以用一句话独立描述（功能完整性）；2. 回滚到此处是否有意义（可恢复性）；3. 与上次快照之间是否有实质变更',
       capability: '判断任务是否在 agent 能力和权限范围内（完全可行/部分可行/不可行 + 理由）',
     };
 
+    const staticCtx = this.staticContext ? `\n\n## 静态上下文（AGENT.md）\n${this.staticContext}\n` : '';
     const system = `你是一个裁决 Agent。任务类型：${typeDescriptions[type]}。
 请给出明确结论，并在末尾以 JSON 输出：
-{"decision": "...", "uncertainty": {"score": 0-1, "reasons": []}}`;
+{"decision": "...", "uncertainty": {"score": 0-1, "reasons": []}}${staticCtx}`;
     const raw = await this.provider.complete(system, `Context:\n${context}\n\nInput:\n${input}`);
     return this.parseWithUncertainty(raw);
   }

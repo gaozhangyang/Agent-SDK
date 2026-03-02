@@ -82,7 +82,7 @@ describe('Primitives', () => {
     const entries = terminalLog.all();
     expect(entries).toHaveLength(1);
     expect(entries[0].command).toBe('echo test');
-    expect(entries[0].stdout).toContain('test');
+    expect(entries[0].output).toContain('test');
   });
 
   test('edit() 编辑 coreDir 下的路径时抛出错误', async () => {

@@ -22,7 +22,7 @@ app.use(express.json({ limit: '2mb' }));
 
 // 全局 Agent 缓存，按 workDir 索引，实现跨请求的 Session 恢复
 const agentCache: Map<string, MetaAgent> = new Map();
-const agentConfigCache: Map<string, { llmConfig: any; collectConfig: CollectConfig }> = new Map();
+const agentConfigCache: Map<string, { llmConfig: any; collectConfig: CollectConfig; agentMdContent?: string }> = new Map();
 
 /** 请求体：运行一次 Agent 循环 */
 export type RunRequestBody = {
@@ -153,21 +153,21 @@ app.post('/run', async (req: Request, res: Response) => {
         ),
       };
 
-      // L0.5: 自动加载 AGENTS.md 作为静态上下文
-      // 读取工作目录下的 AGENTS.md（如果存在），并添加到 collect 源的前面
-      const agentsMdPath = path.join(workDir, 'AGENTS.md');
+      // L0.5: 自动加载 AGENT.md 作为静态上下文
+      // 读取工作目录下的 AGENT.md（如果存在），并注入到 LLMCall
+      // 遵循 agent-design-principles-v2.md 核心层 3：静态上下文注入
+      const agentMdPath = path.join(workDir, 'AGENT.md');
+      let agentMdContent: string | undefined;
       try {
         const fs = await import('fs/promises');
-        await fs.readFile(agentsMdPath, 'utf-8');
-        // 将 AGENTS.md 添加到 sources 的最前面，权重最高
-        resolvedCollectConfig.sources = [
-          { type: 'file', query: agentsMdPath, weight: 1.0 } as CollectSource,
-          ...resolvedCollectConfig.sources,
-        ];
-        console.log(`[L0.5] 自动加载 AGENTS.md: ${agentsMdPath}`);
+        agentMdContent = await fs.readFile(agentMdPath, 'utf-8');
+        console.log(`[L0.5] 自动加载 AGENT.md: ${agentMdPath}`);
       } catch {
-        console.log(`[L0.5] AGENTS.md 不存在，跳过自动加载`);
+        console.log(`[L0.5] AGENT.md 不存在，跳过自动加载`);
       }
+
+      // 查找 skills 目录
+      const skillsDir = path.join(workDir, 'skills');
 
       // 使用 createMetaAgent 创建 agent
       agent = await createMetaAgent(
@@ -179,12 +179,14 @@ app.post('/run', async (req: Request, res: Response) => {
           subgoals: subgoals.length > 0 ? subgoals : [goal],
           logToFile: true,  // 始终保存 Trace、Terminal Log、Memory 到 .agent/ 目录
           collectConfig: resolvedCollectConfig,
+          agentMdContent,  // 传递 AGENT.md 内容作为静态上下文
+          skillsDir,      // 传递 skills 目录路径
         }
       );
       
       // 缓存 agent 实例
       agentCache.set(cacheKey, agent);
-      agentConfigCache.set(cacheKey, { llmConfig, collectConfig: resolvedCollectConfig });
+      agentConfigCache.set(cacheKey, { llmConfig, collectConfig: resolvedCollectConfig, agentMdContent });
     }
 
     // 获取当前收集配置（用于恢复的 agent）

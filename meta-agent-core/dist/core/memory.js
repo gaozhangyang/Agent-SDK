@@ -19,6 +19,29 @@ class Memory {
     constructor(logFilePath) {
         this.logFilePath = logFilePath;
     }
+    /**
+     * 从文件加载累积的 Memory 条目（用于 Session 恢复）
+     */
+    async loadFromFile() {
+        if (!this.logFilePath)
+            return;
+        try {
+            const content = await promises_1.default.readFile(this.logFilePath, 'utf-8');
+            const lines = content.trim().split('\n').filter(line => line.trim());
+            for (const line of lines) {
+                try {
+                    const entry = JSON.parse(line);
+                    this.entries.push(entry);
+                }
+                catch {
+                    // 跳过解析失败的行
+                }
+            }
+        }
+        catch {
+            // 文件不存在或读取失败，忽略
+        }
+    }
     async appendToFile(entry) {
         if (!this.logFilePath)
             return;

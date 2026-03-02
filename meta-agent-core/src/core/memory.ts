@@ -65,7 +65,7 @@ export class Memory {
 
   /**
    * 追加一条记忆记录
-   * 在子目标真正完成后，由 Loop 统一调用
+   * 在任务开始时调用，记录用户请求
    */
   append(entry: Omit<MemoryEntry, 'ts'>): void {
     const fullEntry: MemoryEntry = { ...entry, ts: Date.now() };
@@ -75,6 +75,29 @@ export class Memory {
       return this.appendToFile(fullEntry);
     });
     this.pendingWrites.push(this.lastWritePromise);
+  }
+
+  /**
+   * 更新最后一条记忆的 solutionSummary
+   * 在任务完成时调用，记录总结回答
+   */
+  updateLastEntry(solutionSummary: string): void {
+    if (this.entries.length === 0) return;
+    const lastEntry = this.entries[this.entries.length - 1];
+    lastEntry.solutionSummary = solutionSummary;
+    // 重新写入整个文件（因为是追加写，需要更新最后一条）
+    // 注意：这是一种简化实现，实际上应该只更新最后一条
+    this.lastWritePromise = this.lastWritePromise.then(async () => {
+      // 重新写入所有条目到文件
+      const lines = this.entries.map(e => JSON.stringify(e)).join('\n') + '\n';
+      if (this.logFilePath) {
+        try {
+          await fs.writeFile(this.logFilePath, lines, 'utf-8');
+        } catch {
+          // 写文件失败不抛错，静默忽略
+        }
+      }
+    });
   }
 
   /**

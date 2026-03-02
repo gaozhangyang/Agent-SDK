@@ -24,5 +24,6 @@ export type RunRequestBody = {
         maxCollectRetry?: number;
     };
     debug?: boolean;
+    resume?: boolean;
 };
 //# sourceMappingURL=index.d.ts.map

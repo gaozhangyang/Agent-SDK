@@ -39,8 +39,9 @@ async function createMetaAgent(projectPath, goal, llmProvider, options) {
     const agentDir = path_1.default.join(projectPath, '.agent');
     await promises_1.default.mkdir(agentDir, { recursive: true });
     // 2. 初始化 Trace、TerminalLog 和 Memory
+    // 遵循 agent-design-principles-v2.md 核心层 4：项目目录约定
     const traceLogPath = options?.logToFile ? path_1.default.join(agentDir, 'trace.jsonl') : undefined;
-    const terminalLogPath = options?.logToFile ? path_1.default.join(agentDir, 'terminal.jsonl') : undefined;
+    const terminalLogPath = options?.logToFile ? path_1.default.join(agentDir, 'terminal.log') : undefined;
     const memoryLogPath = options?.logToFile ? path_1.default.join(agentDir, 'memory.jsonl') : undefined;
     const trace = new trace_1.Trace(traceLogPath);
     const terminalLog = new trace_1.TerminalLog(terminalLogPath);
@@ -52,6 +53,7 @@ async function createMetaAgent(projectPath, goal, llmProvider, options) {
     // 4. 用 StateManager 尝试恢复 State，失败则 createInitial
     const stateManager = new state_1.StateManager();
     let state = await stateManager.load(agentDir);
+    const isResumed = state !== null;
     if (!state) {
         state = stateManager.createInitial(goal, options?.permissions ?? 2);
         if (options?.subgoals) {
@@ -59,6 +61,16 @@ async function createMetaAgent(projectPath, goal, llmProvider, options) {
             state.currentSubgoal = options.subgoals[0] ?? null;
         }
         await stateManager.save(agentDir, state);
+    }
+    else {
+        // Session 恢复：加载累积的 Trace、TerminalLog 和 Memory
+        // 这样可以继续之前的序列号，保证日志的连续性
+        if (traceLogPath)
+            await trace.loadFromFile();
+        if (terminalLogPath)
+            await terminalLog.loadFromFile();
+        if (memoryLogPath)
+            await memory.loadFromFile();
     }
     // 5. 组合标准 hooks：createModeHooks() + createPermissionHooks() + createErrorClassifier()
     // options.hooks 优先级高于标准 hooks
@@ -80,6 +92,10 @@ async function createMetaAgent(projectPath, goal, llmProvider, options) {
     };
     // 6. 创建 LLMCall 实例
     const llm = new llm_1.LLMCall(llmProvider);
+    // 设置静态上下文（AGENT.md 内容）
+    if (options?.agentMdContent) {
+        llm.setStaticContext(options.agentMdContent);
+    }
     // 7. 创建 Harness 和 InterruptChannel
     const harness = new harness_1.Harness(primitives, projectPath, agentDir);
     const interrupt = new interrupt_1.InterruptChannel();
@@ -94,6 +110,7 @@ async function createMetaAgent(projectPath, goal, llmProvider, options) {
         interrupt,
         stateManager,
         agentDir,
+        skillsDir: options?.skillsDir, // 传递 skills 目录路径
     };
     // 9. 返回 MetaAgent 对象
     return {

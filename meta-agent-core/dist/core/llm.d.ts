@@ -13,7 +13,13 @@ export interface LLMProvider {
 }
 export declare class LLMCall {
     private provider;
+    private staticContext;
     constructor(provider: LLMProvider);
+    /**
+     * 设置静态上下文（如 AGENT.md 内容）
+     * 静态上下文会在每次 LLMCall 时自动注入
+     */
+    setStaticContext(context: string): void;
     reason(context: string, input: string): Promise<LLMCallResult>;
     reasonMulti(context: string, input: string, n?: number): Promise<LLMCallMulti>;
     judge(type: JudgeType, context: string, input: string): Promise<LLMCallResult>;

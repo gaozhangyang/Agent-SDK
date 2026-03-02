@@ -1,25 +1,5 @@
 [
   {
-    "arxiv_id": "2602.24290",
-    "title": "UFO-4D: Unposed Feedforward 4D Reconstruction from Two Images",
-    "abstract": "Dense 4D reconstruction from unposed images remains a critical challenge, with current methods relying on slow test-time optimization or fragmented, task-specific feedforward models. We introduce UFO-4D, a unified feedforward framework to reconstruct a dense, explicit 4D representation from just a pair of unposed images. UFO-4D directly estimates dynamic 3D Gaussian Splats, enabling the joint and consistent estimation of 3D geometry, 3D motion, and camera pose in a feedforward manner. Our core insight is that differentiably rendering multiple signals from a single Dynamic 3D Gaussian representation offers major training advantages. This approach enables a self-supervised image synthesis loss while tightly coupling appearance, depth, and motion. Since all modalities share the same geometric primitives, supervising one inherently regularizes and improves the others. This synergy overcomes data scarcity, allowing UFO-4D to outperform prior work by up to 3 times in joint geometry, motion, and camera pose estimation. Our representation also enables high-fidelity 4D interpolation across novel views and time. Please visit our project page for visual results: https://ufo-4d.github.io/",
-    "authors": [
-      "Junhwa Hur",
-      "Charles Herrmann",
-      "Songyou Peng",
-      "Philipp Henzler",
-      "Zeyu Ma",
-      "Todd Zickler",
-      "Deqing Sun"
-    ],
-    "submitted": "2026-02-27",
-    "categories": [
-      "cs.CV"
-    ],
-    "pdf_url": "https://arxiv.org/pdf/2602.24290",
-    "abs_url": "https://arxiv.org/abs/2602.24290"
-  },
-  {
     "arxiv_id": "2602.24289",
     "title": "Mode Seeking meets Mean Seeking for Fast Long Video Generation",
     "abstract": "Scaling video generation from seconds to minutes faces a critical bottleneck: while short-video data is abundant and high-fidelity, coherent long-form data is scarce and limited to narrow domains. To address this, we propose a training paradigm where Mode Seeking meets Mean Seeking, decoupling local fidelity from long-term coherence based on a unified representation via a Decoupled Diffusion Transformer. Our approach utilizes a global Flow Matching head trained via supervised learning on long videos to capture narrative structure, while simultaneously employing a local Distribution Matching head that aligns sliding windows to a frozen short-video teacher via a mode-seeking reverse-KL divergence. This strategy enables the synthesis of minute-scale videos that learns long-range coherence and motions from limited long videos via supervised flow matching, while inheriting local realism by aligning every sliding-window segment of the student to a frozen short-video teacher, resulting in a few-step fast long video generator. Evaluations show that our method effectively closes the fidelity-horizon gap by jointly improving local sharpness, motion and long-range consistency. Project website: https://primecai.github.io/mmm/.",
@@ -42,7 +22,9 @@
       "cs.LG"
     ],
     "pdf_url": "https://arxiv.org/pdf/2602.24289",
-    "abs_url": "https://arxiv.org/abs/2602.24289"
+    "abs_url": "https://arxiv.org/abs/2602.24289",
+    "relevance_score": 7.0,
+    "target_topic": "Computer_Vision"
   },
   {
     "arxiv_id": "2602.24288",
@@ -63,7 +45,9 @@
       "cs.CL"
     ],
     "pdf_url": "https://arxiv.org/pdf/2602.24288",
-    "abs_url": "https://arxiv.org/abs/2602.24288"
+    "abs_url": "https://arxiv.org/abs/2602.24288",
+    "relevance_score": 12.0,
+    "target_topic": "NLP_and_LLM"
   },
   {
     "arxiv_id": "2602.24287",
@@ -82,7 +66,9 @@
       "cs.AI"
     ],
     "pdf_url": "https://arxiv.org/pdf/2602.24287",
-    "abs_url": "https://arxiv.org/abs/2602.24287"
+    "abs_url": "https://arxiv.org/abs/2602.24287",
+    "relevance_score": 10.0,
+    "target_topic": "NLP_and_LLM"
   },
   {
     "arxiv_id": "2602.24286",
@@ -112,7 +98,9 @@
       "cs.AI"
     ],
     "pdf_url": "https://arxiv.org/pdf/2602.24286",
-    "abs_url": "https://arxiv.org/abs/2602.24286"
+    "abs_url": "https://arxiv.org/abs/2602.24286",
+    "relevance_score": 9.0,
+    "target_topic": "Reinforcement_Learning"
   },
   {
     "arxiv_id": "2602.24283",
@@ -132,7 +120,9 @@
       "cs.CL"
     ],
     "pdf_url": "https://arxiv.org/pdf/2602.24283",
-    "abs_url": "https://arxiv.org/abs/2602.24283"
+    "abs_url": "https://arxiv.org/abs/2602.24283",
+    "relevance_score": 10.0,
+    "target_topic": "NLP_and_LLM"
   },
   {
     "arxiv_id": "2602.24281",
@@ -152,26 +142,9 @@
       "cs.AI"
     ],
     "pdf_url": "https://arxiv.org/pdf/2602.24281",
-    "abs_url": "https://arxiv.org/abs/2602.24281"
-  },
-  {
-    "arxiv_id": "2602.24278",
-    "title": "Who Guards the Guardians? The Challenges of Evaluating Identifiability of Learned Representations",
-    "abstract": "Identifiability in representation learning is commonly evaluated using standard metrics (e.g., MCC, DCI, R^2) on synthetic benchmarks with known ground-truth factors. These metrics are assumed to reflect recovery up to the equivalence class guaranteed by identifiability theory. We show that this assumption holds only under specific structural conditions: each metric implicitly encodes assumptions about both the data-generating process (DGP) and the encoder. When these assumptions are violated, metrics become misspecified and can produce systematic false positives and false negatives. Such failures occur both within classical identifiability regimes and in post-hoc settings where identifiability is most needed. We introduce a taxonomy separating DGP assumptions from encoder geometry, use it to characterise the validity domains of existing metrics, and release an evaluation suite for reproducible stress testing and comparison.",
-    "authors": [
-      "Shruti Joshi",
-      "Théo Saulus",
-      "Wieland Brendel",
-      "Philippe Brouillard",
-      "Dhanya Sridhar",
-      "Patrik Reizinger"
-    ],
-    "submitted": "2026-02-27",
-    "categories": [
-      "cs.LG"
-    ],
-    "pdf_url": "https://arxiv.org/pdf/2602.24278",
-    "abs_url": "https://arxiv.org/abs/2602.24278"
+    "abs_url": "https://arxiv.org/abs/2602.24281",
+    "relevance_score": 9.0,
+    "target_topic": "Reinforcement_Learning"
   },
   {
     "arxiv_id": "2602.24277",
@@ -188,7 +161,9 @@
       "cs.AI"
     ],
     "pdf_url": "https://arxiv.org/pdf/2602.24277",
-    "abs_url": "https://arxiv.org/abs/2602.24277"
+    "abs_url": "https://arxiv.org/abs/2602.24277",
+    "relevance_score": 11.0,
+    "target_topic": "NLP_and_LLM"
   },
   {
     "arxiv_id": "2602.24275",
@@ -209,6 +184,8 @@
       "cs.CV"
     ],
     "pdf_url": "https://arxiv.org/pdf/2602.24275",
-    "abs_url": "https://arxiv.org/abs/2602.24275"
+    "abs_url": "https://arxiv.org/abs/2602.24275",
+    "relevance_score": 8.0,
+    "target_topic": "Computer_Vision"
   }
 ]

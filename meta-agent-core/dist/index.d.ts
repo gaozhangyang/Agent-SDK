@@ -37,5 +37,7 @@ export declare function createMetaAgent(projectPath: string, goal: string, llmPr
     logToFile?: boolean;
     hooks?: LoopHooks;
     collectConfig?: CollectConfig;
+    agentMdContent?: string;
+    skillsDir?: string;
 }): Promise<MetaAgent>;
 //# sourceMappingURL=index.d.ts.map

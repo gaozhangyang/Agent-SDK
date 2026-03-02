@@ -47,6 +47,9 @@ const express_1 = __importDefault(require("express"));
 const index_1 = require("../index");
 const app = (0, express_1.default)();
 app.use(express_1.default.json({ limit: '2mb' }));
+// 全局 Agent 缓存，按 workDir 索引，实现跨请求的 Session 恢复
+const agentCache = new Map();
+const agentConfigCache = new Map();
 /** 可序列化的 State 摘要（供 HTTP 返回） */
 function serializeState(s) {
     return {
@@ -68,11 +71,12 @@ app.get('/health', (_req, res) => {
 /**
  * POST /run
  * 执行一次 Agent 循环，返回 status、state 摘要、trace 序列化
+ * 支持跨请求恢复 Session（通过缓存 agent 实例）
  */
 app.post('/run', async (req, res) => {
     try {
         const body = req.body;
-        const { goal, subgoals = [], workDir, collectConfig, llm: llmConfig, thresholds, debug = false } = body;
+        const { goal, subgoals = [], workDir, collectConfig, llm: llmConfig, thresholds, debug = false, resume = true } = body;
         if (!goal || typeof workDir !== 'string') {
             res.status(400).json({ error: '缺少 goal 或 workDir' });
             return;
@@ -92,66 +96,89 @@ app.post('/run', async (req, res) => {
                 goal: goal.substring(0, 100),
                 workDir,
                 sources: collectConfig.sources.map((s) => s.query),
-                debug
+                debug,
+                resume,
             });
         }
-        const baseUrl = llmConfig.baseUrl.replace(/\/$/, '');
-        const provider = {
-            async complete(system, user) {
-                const res = await (0, node_fetch_1.default)(`${baseUrl}/chat/completions`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        Authorization: llmConfig.apiKey ? `Bearer ${llmConfig.apiKey}` : '',
-                    },
-                    body: JSON.stringify({
-                        model: llmConfig.model,
-                        messages: [
-                            { role: 'system', content: system },
-                            { role: 'user', content: user },
-                        ],
-                        temperature: 0.3,
-                        max_tokens: 1024,
-                    }),
-                });
-                if (!res.ok)
-                    throw new Error(`LLM API error: ${res.status} ${await res.text()}`);
-                const data = (await res.json());
-                return data.choices[0].message.content;
-            },
-        };
-        // file 类型且为相对路径时，解析为 workDir 下的绝对路径
-        const resolvedCollectConfig = {
-            ...collectConfig,
-            sources: collectConfig.sources.map((s) => s.type === 'file' && !path_1.default.isAbsolute(s.query)
-                ? { ...s, query: path_1.default.join(workDir, s.query) }
-                : s),
-        };
-        // L0.5: 自动加载 AGENTS.md 作为静态上下文
-        // 读取工作目录下的 AGENTS.md（如果存在），并添加到 collect 源的前面
-        const agentsMdPath = path_1.default.join(workDir, 'AGENTS.md');
-        try {
-            const fs = await Promise.resolve().then(() => __importStar(require('fs/promises')));
-            await fs.readFile(agentsMdPath, 'utf-8');
-            // 将 AGENTS.md 添加到 sources 的最前面，权重最高
-            resolvedCollectConfig.sources = [
-                { type: 'file', query: agentsMdPath, weight: 1.0 },
-                ...resolvedCollectConfig.sources,
-            ];
-            console.log(`[L0.5] 自动加载 AGENTS.md: ${agentsMdPath}`);
+        // 使用 workDir 作为缓存键
+        const cacheKey = workDir;
+        // 决定是否使用缓存的 agent
+        let agent;
+        let isResumed = false;
+        if (resume && agentCache.has(cacheKey)) {
+            // 恢复之前的 Session
+            agent = agentCache.get(cacheKey);
+            isResumed = true;
+            if (debug) {
+                console.log('[DEBUG] Resuming previous session for:', cacheKey);
+            }
         }
-        catch {
-            console.log(`[L0.5] AGENTS.md 不存在，跳过自动加载`);
+        else {
+            // 创建新的 agent 实例
+            const baseUrl = llmConfig.baseUrl.replace(/\/$/, '');
+            const provider = {
+                async complete(system, user) {
+                    const res = await (0, node_fetch_1.default)(`${baseUrl}/chat/completions`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            Authorization: llmConfig.apiKey ? `Bearer ${llmConfig.apiKey}` : '',
+                        },
+                        body: JSON.stringify({
+                            model: llmConfig.model,
+                            messages: [
+                                { role: 'system', content: system },
+                                { role: 'user', content: user },
+                            ],
+                            temperature: 0.3,
+                            max_tokens: 1024,
+                        }),
+                    });
+                    if (!res.ok)
+                        throw new Error(`LLM API error: ${res.status} ${await res.text()}`);
+                    const data = (await res.json());
+                    return data.choices[0].message.content;
+                },
+            };
+            // file 类型且为相对路径时，解析为 workDir 下的绝对路径
+            const resolvedCollectConfig = {
+                ...collectConfig,
+                sources: collectConfig.sources.map((s) => s.type === 'file' && !path_1.default.isAbsolute(s.query)
+                    ? { ...s, query: path_1.default.join(workDir, s.query) }
+                    : s),
+            };
+            // L0.5: 自动加载 AGENT.md 作为静态上下文
+            // 读取工作目录下的 AGENT.md（如果存在），并注入到 LLMCall
+            // 遵循 agent-design-principles-v2.md 核心层 3：静态上下文注入
+            const agentMdPath = path_1.default.join(workDir, 'AGENT.md');
+            let agentMdContent;
+            try {
+                const fs = await Promise.resolve().then(() => __importStar(require('fs/promises')));
+                agentMdContent = await fs.readFile(agentMdPath, 'utf-8');
+                console.log(`[L0.5] 自动加载 AGENT.md: ${agentMdPath}`);
+            }
+            catch {
+                console.log(`[L0.5] AGENT.md 不存在，跳过自动加载`);
+            }
+            // 查找 skills 目录
+            const skillsDir = path_1.default.join(workDir, 'skills');
+            // 使用 createMetaAgent 创建 agent
+            agent = await (0, index_1.createMetaAgent)(workDir, goal, provider, {
+                permissions: 2, // 默认权限级别
+                subgoals: subgoals.length > 0 ? subgoals : [goal],
+                logToFile: true, // 始终保存 Trace、Terminal Log、Memory 到 .agent/ 目录
+                collectConfig: resolvedCollectConfig,
+                agentMdContent, // 传递 AGENT.md 内容作为静态上下文
+                skillsDir, // 传递 skills 目录路径
+            });
+            // 缓存 agent 实例
+            agentCache.set(cacheKey, agent);
+            agentConfigCache.set(cacheKey, { llmConfig, collectConfig: resolvedCollectConfig, agentMdContent });
         }
-        // 使用 createMetaAgent 创建 agent
-        const agent = await (0, index_1.createMetaAgent)(workDir, goal, provider, {
-            permissions: 2, // 默认权限级别
-            subgoals: subgoals.length > 0 ? subgoals : [goal],
-            logToFile: true, // 始终保存 Trace、Terminal Log、Memory 到 .agent/ 目录
-            collectConfig: resolvedCollectConfig,
-        });
+        // 获取当前收集配置（用于恢复的 agent）
+        const currentCollectConfig = agentConfigCache.get(cacheKey)?.collectConfig || collectConfig;
         const result = await agent.run({
-            collectConfig: resolvedCollectConfig,
+            collectConfig: currentCollectConfig,
             thresholds,
             onEscalate: async (reason) => {
                 // 仅记录，不阻断返回
@@ -162,6 +189,7 @@ app.post('/run', async (req, res) => {
         });
         const trace = agent.getTrace();
         const terminalLog = agent.getTerminalLog();
+        const memory = agent.getMemory();
         res.json({
             status: result.status,
             reason: result.status === 'escalated' && 'reason' in result ? result.reason : (result.status === 'budget_exceeded' ? 'budget_exceeded: 迭代次数超出限制' : undefined),
@@ -169,6 +197,8 @@ app.post('/run', async (req, res) => {
             traceJson: trace.serialize(),
             traceLength: trace.all().length,
             terminalLogLength: terminalLog.all().length,
+            memoryLength: memory.size(),
+            isResumed,
             debug: debug ? {
                 iterations: result.state.iterationCount,
                 mode: result.state.mode,
@@ -182,10 +212,51 @@ app.post('/run', async (req, res) => {
         res.status(500).json({ status: 'error', reason: message });
     }
 });
+/**
+ * GET /agent/:workDir
+ * 获取缓存的 agent 状态
+ */
+app.get('/agent/:workDir', async (req, res) => {
+    const { workDir } = req.params;
+    const cacheKey = workDir;
+    if (!agentCache.has(cacheKey)) {
+        res.status(404).json({ error: 'Agent not found', workDir });
+        return;
+    }
+    const agent = agentCache.get(cacheKey);
+    const state = agent.getState();
+    const trace = agent.getTrace();
+    const terminalLog = agent.getTerminalLog();
+    const memory = agent.getMemory();
+    res.json({
+        workDir,
+        state: serializeState(state),
+        traceLength: trace.all().length,
+        terminalLogLength: terminalLog.all().length,
+        memoryLength: memory.size(),
+    });
+});
+/**
+ * DELETE /agent/:workDir
+ * 清除缓存的 agent（结束 Session）
+ */
+app.delete('/agent/:workDir', async (req, res) => {
+    const { workDir } = req.params;
+    const cacheKey = workDir;
+    if (!agentCache.has(cacheKey)) {
+        res.status(404).json({ error: 'Agent not found', workDir });
+        return;
+    }
+    agentCache.delete(cacheKey);
+    agentConfigCache.delete(cacheKey);
+    res.json({ ok: true, workDir, message: 'Agent cache cleared' });
+});
 const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3890;
 app.listen(PORT, () => {
     console.log(`Meta Agent Core HTTP 服务: http://0.0.0.0:${PORT}`);
-    console.log('  GET  /health  健康检查');
-    console.log('  POST /run     执行 Agent 循环');
+    console.log('  GET  /health              健康检查');
+    console.log('  POST /run                 执行 Agent 循环（自动恢复 Session）');
+    console.log('  GET  /agent/:workDir      获取 agent 状态');
+    console.log('  DELETE /agent/:workDir   清除 agent 缓存');
 });
 //# sourceMappingURL=index.js.map

@@ -85,7 +85,7 @@ async function runLoop(state, config, deps, hooks) {
             return { status: 'completed', state };
         }
         // ── 3. [Collect] → confidence 分支：补采集 / Escalate / 继续 ─────────────
-        let collectResult = await (0, collect_1.collect)(config.collectConfig, deps.primitives, (tag) => deps.trace.filterByTag(tag));
+        let collectResult = await (0, collect_1.collect)(config.collectConfig, deps.primitives, (tag) => deps.trace.filterByTag(tag), deps.skillsDir);
         deps.trace.append({
             ts: Date.now(),
             kind: 'collect',
@@ -98,7 +98,7 @@ async function runLoop(state, config, deps, hooks) {
             collectResult.confidence.reliability >= t.confidenceMid &&
             collectRetry < t.maxCollectRetry) {
             collectRetry++;
-            collectResult = await (0, collect_1.collect)(config.collectConfig, deps.primitives, (tag) => deps.trace.filterByTag(tag));
+            collectResult = await (0, collect_1.collect)(config.collectConfig, deps.primitives, (tag) => deps.trace.filterByTag(tag), deps.skillsDir);
             deps.trace.append({
                 ts: Date.now(),
                 kind: 'collect',

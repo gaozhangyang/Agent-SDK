@@ -19,6 +19,10 @@ export declare class Memory {
     private pendingWrites;
     private lastWritePromise;
     constructor(logFilePath?: string);
+    /**
+     * 从文件加载累积的 Memory 条目（用于 Session 恢复）
+     */
+    loadFromFile(): Promise<void>;
     private appendToFile;
     /**
      * 追加一条记忆记录

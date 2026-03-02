@@ -93,9 +93,10 @@ describe('TerminalLog', () => {
     
     terminalLog.append({
       ts: 1000,
+      operation: 'bash',
       command: 'echo hello',
-      stdout: 'hello\n',
-      stderr: '',
+      input: 'echo hello',
+      output: 'hello\n',
       exitCode: 0,
       durationMs: 10,
     });
@@ -111,9 +112,9 @@ describe('TerminalLog', () => {
     const terminalLog = new TerminalLog();
     
     trace.append({ ts: 1000, kind: 'collect', data: {} });
-    terminalLog.append({ ts: 2000, command: 'ls', stdout: '', stderr: '', exitCode: 0, durationMs: 0 });
+    terminalLog.append({ ts: 2000, operation: 'bash', command: 'ls', input: 'ls', output: '', exitCode: 0, durationMs: 0 });
     trace.append({ ts: 3000, kind: 'reason', data: {} });
-    terminalLog.append({ ts: 4000, command: 'pwd', stdout: '', stderr: '', exitCode: 0, durationMs: 0 });
+    terminalLog.append({ ts: 4000, operation: 'bash', command: 'pwd', input: 'pwd', output: '', exitCode: 0, durationMs: 0 });
     
     expect(trace.getSeq()).toBe(2);
     expect(terminalLog.getSeq()).toBe(2);
@@ -133,9 +134,10 @@ describe('TerminalLog', () => {
     
     terminalLog.append({
       ts: 1000,
+      operation: 'bash',
       command: 'echo test',
-      stdout: 'test\n',
-      stderr: '',
+      input: 'echo test',
+      output: 'test\n',
       exitCode: 0,
       durationMs: 5,
     });
@@ -156,9 +158,10 @@ describe('TerminalLog', () => {
     const terminalLog = new TerminalLog();
     terminalLog.append({
       ts: 1000,
+      operation: 'bash',
       command: 'ls -la',
-      stdout: 'total 0\n',
-      stderr: '',
+      input: 'ls -la',
+      output: 'total 0\n',
       exitCode: 0,
       durationMs: 20,
     });

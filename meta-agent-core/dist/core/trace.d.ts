@@ -38,6 +38,10 @@ export declare class Trace {
     private pendingWrites;
     private lastWritePromise;
     constructor(logFilePath?: string);
+    /**
+     * 从文件加载累积的 Trace 条目（用于 Session 恢复）
+     */
+    loadFromFile(): Promise<void>;
     private appendToFile;
     append(entry: Omit<TraceEntry, 'seq'>): void;
     flush(): Promise<void>;
@@ -56,6 +60,10 @@ export declare class TerminalLog {
     private pendingWrites;
     private lastWritePromise;
     constructor(logFilePath?: string);
+    /**
+     * 从文件加载累积的 Terminal Log 条目（用于 Session 恢复）
+     */
+    loadFromFile(): Promise<void>;
     private appendToFile;
     append(entry: Omit<TerminalEntry, 'seq'>): void;
     flush(): Promise<void>;

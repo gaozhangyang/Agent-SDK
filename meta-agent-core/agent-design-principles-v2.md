@@ -141,19 +141,38 @@ type TraceEntry = {
   tags?: string[];
 };
 
-// Terminal Log：终端——记录"做了什么"
+// Terminal Log：终端——记录所有原子操作及其结果
+// 包含 LLMCall、Collect、read、write、edit、bash 等操作
+type OperationType = 'llmcall' | 'collect' | 'read' | 'write' | 'edit' | 'bash';
+
 type TerminalEntry = {
   ts: number;
   seq: number;                 // 全局序号，与 Trace.terminal_seq 对应
-  command: string;             // 原始命令
-  stdout: string;
-  stderr: string;
-  exitCode: number;
-  durationMs: number;
+  operation: OperationType;    // 操作类型
+  input?: string;              // 输入内容（路径、prompt 等）
+  output: string;              // 操作结果（可能被截断，超出 100KB 时截断并标记）
+  command?: string;           // 原始命令（bash 专用）
+  exitCode?: number;           // 退出码（bash 专用）
+  durationMs?: number;        // 耗时
+  truncated?: boolean;         // 输出是否被截断
 };
 ```
 
 两者均为追加写，跨 Session 累积，不清空。`narrative` 类型的 Trace 条目是人类可读的状态摘要，在 Mode 切换和 Milestone 完成时由轻量 LLMCall[Reason] 生成——这是 agent 自我描述能力的基础。
+
+**Terminal Log 记录范围：**
+- `llmcall`：LLMCall[Reason/Judge] 的输入输出
+- `collect`：Collect 检索的输入输出
+- `read`：文件读取操作的内容
+- `write`：文件写入操作（记录写入字节数）
+- `edit`：文件编辑操作（记录替换内容摘要）
+- `bash`：终端命令执行（记录命令、输出、退出码、耗时）
+
+**双格式日志：**
+- `trace.jsonl`：JSON 格式，用于程序解析和机器读取
+- `terminal.log`：Shell 友好格式，用于人类阅读。格式为 `[时间] [角色] >/< 内容`，其中角色包括 `USER`（用户输入）和 `AGENT`（Agent 操作输出）
+
+**输出截断机制：** 当输出超过配置阈值时自动截断，并在末尾添加标记。默认阈值为 100KB，可通过 AGENT.md 中的 `maxOutputLength` 配置项自定义（单位：字节）。
 
 ### 核心层 4：项目目录约定
 
@@ -164,10 +183,10 @@ type TerminalEntry = {
 ├── .agent/
 │   ├── state.json          # 上次运行结束时的 State 快照（Session 恢复入口）
 │   ├── trace.jsonl         # 累积的推理轨迹（追加写，跨 Session）
-│   ├── terminal.jsonl      # 累积的终端日志（追加写，跨 Session）
+│   ├── terminal.log        # 累积的终端格式日志（追加写，跨 Session，Shell 格式）
 │   ├── memory.jsonl        # 长期记忆（用户请求 + 解决结论，追加写，跨 Session）
 │   └── sessions/           # 每次运行的摘要索引（便于历史检索）
-├── AGENTS.md               # 静态上下文（提交到 Git，团队共享）
+├── AGENT.md                # 静态上下文（提交到 Git，团队共享）
 └── [项目源代码]
 ```
 
@@ -193,8 +212,9 @@ MemoryEntry = { ts, userRequest, solutionSummary, sessionId?, archivedSubgoal? }
 Memory 是**结构化长期记忆**，与 Trace 分开维护，专门存储"用户请求 + 解决结论"的结构化记录：
 
 - **存储格式**：每条记录包含 `userRequest`（用户原始请求）+ `solutionSummary`（解决方案总结）
-- **写入时机**：子目标真正完成后，由 Loop 统一写一条总结记录
-- **Trace 标记**：每次 Memory 写入时，在 Trace 中追加一条 `kind: 'narrative'` 标记这次记忆更新
+- **写入时机**：
+  - 任务开始时（首次迭代）记录 `userRequest = goal`，此时 `solutionSummary = '[任务进行中...]'`
+  - 任务终止时（goal_completed / budget_exceeded / escalated）更新 `solutionSummary` 为任务总结
 - **检索接口**：`search(query)` 按关键词检索，`recent(n)` 获取最近的 N 条记录
 - **Collect 集成**：`Collect` 可以把 Memory 作为一个受控 source 注入上下文（带上 `coverage/reliability/by_source` 信息）
 
@@ -216,6 +236,19 @@ coverage 低，reliability 高  → 补充采集（再次 Collect，≤N 次）
 coverage 高，reliability 低  → 刷新来源或 Escalate
 coverage 低，reliability 低  → 直接 Escalate
 ```
+
+**Collect 支持的 Source 类型：**
+
+| 类型 | 说明 | 典型用途 |
+|------|------|---------|
+| file | 读取指定文件 | 模板、知识库文档 |
+| bash | 执行 shell 命令并获取输出 | 动态查询、代码搜索 |
+| trace_tag | 按标签过滤 Trace 历史 | 获取特定类型的推理记录 |
+| skills | 从 skills/ 目录检索技能文档 | 获取工具使用说明、最佳实践 |
+
+**skills 检索：** 当 source type 为 `skills` 时，会在项目根目录下的 `skills/` 目录中检索匹配的 Markdown 文件。检索方式：
+1. 首先尝试直接读取 `{query}.md` 文件
+2. 若失败，则使用 grep 在 skills 目录中搜索包含关键词的文件
 
 ### 核心层 7：核心执行循环骨架
 
@@ -282,9 +315,26 @@ type AgentState = {
 
 git 管理作用域严格限制在项目源代码目录，排除 `.agent/` 目录。
 
-### 编排层 3：静态上下文注入（AGENTS.md）
+### 编排层 3：静态上下文注入（AGENT.md）
 
-纯文本文件，Session 启动时自动读取，提交到 git，团队共享。是最可靠、最可调试的长期记忆基础形式。
+纯文本文件 `AGENT.md`，Session 启动时自动读取（位于工作目录根目录），提交到 git，团队共享。是最可靠、最可调试的长期记忆基础形式。
+
+**实现细节：**
+- SDK 服务器在创建 Agent 时自动读取 `{workDir}/AGENT.md` 文件内容
+- 通过 `LLMCall.setStaticContext()` 方法注入到每次 LLM 调用的 system prompt 中
+- `Collect` 检索范围在 AGENT.md 中明确定义：Trace、Memory、Skills
+
+**AGENT.md 运行时配置：**
+AGENT.md 中可以定义以下运行时配置项：
+
+| 配置项 | 说明 | 默认值 |
+|--------|------|--------|
+| maxOutputLength | Terminal Log 输出截断长度（字节） | 102400 (100KB) |
+
+配置示例：
+```markdown
+maxOutputLength: 204800  # 200KB
+```
 
 ---
 
@@ -411,7 +461,7 @@ Dry-run 结果写入 Terminal Log，标记为 `dry_run: true`。
 
 ### E3：能力边界声明（启动时早期失败）
 
-在读取 AGENTS.md 之后、进入 Plan 模式之前，执行一次能力评估：
+在读取 AGENT.md 之后、进入 Plan 模式之前，执行一次能力评估：
 
 ```
 LLMCall[Judge(capability)](目标描述 + 权限级别 + 环境信息)
@@ -504,13 +554,15 @@ by_source: 哪个来源有问题
             "信息不足导致推理不稳" vs
             "信息充足但模型仍不确定"（任务超出能力边界）
 
-Terminal Log（独立信息流）
-──────────────────────────
-command:  原始命令
-stdout:   标准输出
-stderr:   错误输出
-exitCode: 退出码
-duration: 耗时
+Terminal Log（独立信息流，记录所有原子操作）
+────────────────────────────────────────────
+operation: 操作类型（llmcall/collect/read/write/edit/bash）
+input:     输入内容（路径、prompt 等）
+output:    操作结果（可能被截断）
+command:   原始命令（bash 专用）
+exitCode:  退出码（bash 专用）
+duration:  耗时
+truncated: 输出是否被截断
 
         ↕ 通过 terminal_seq 关联
 

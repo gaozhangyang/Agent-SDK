@@ -2,13 +2,29 @@
 
 import { collect, type CollectConfig } from '../core/collect';
 import { LLMCall } from '../core/llm';
-import { Trace, TerminalLog } from '../core/trace';
+import { Trace, TerminalLog, type OperationType } from '../core/trace';
 import { Memory } from '../core/memory';
 import { Harness } from './harness';
 import { canTransition, type AgentState, type Mode } from './state';
 import { InterruptChannel, type InterruptSignal, type UserDirective } from './interrupt';
 import { StateManager } from './state';
 import type { Primitives } from '../core/primitives';
+
+// 最大输出截断长度（100KB）
+const MAX_OUTPUT_LENGTH = 100 * 1024;
+
+/**
+ * 截断过长的输出，并在末尾标记
+ */
+function truncateOutput(output: string): { content: string; truncated: boolean } {
+  if (output.length > MAX_OUTPUT_LENGTH) {
+    return {
+      content: output.slice(0, MAX_OUTPUT_LENGTH) + '\n\n[... output truncated, exceeded 100KB limit]',
+      truncated: true,
+    };
+  }
+  return { content: output, truncated: false };
+}
 
 // 默认阈值（与 v1 完全相同）
 export const DEFAULT_THRESHOLDS = {
@@ -39,6 +55,7 @@ export type LoopDeps = {
   interrupt: InterruptChannel;
   stateManager: StateManager;
   agentDir: string;   // .agent/ 目录路径，用于 State 持久化
+  skillsDir?: string; // 可选的 skills 目录路径，用于 Collect 检索
 };
 
 export type LoopConfig = {
@@ -64,6 +81,14 @@ export async function runLoop(
   hooks?: LoopHooks,
 ): Promise<LoopResult> {
   const t = { ...DEFAULT_THRESHOLDS, ...config.thresholds };
+
+  // 任务开始时记录用户请求（仅首次运行时记录）
+  if (state.iterationCount === 1 && state.archivedSubgoals.length === 0) {
+    deps.memory.append({
+      userRequest: state.goal,
+      solutionSummary: '[任务进行中...]',
+    });
+  }
 
   while (true) {
     state.iterationCount++;
@@ -111,6 +136,11 @@ export async function runLoop(
     // ── 2. [终止条件] 三个检查（目标完成 / 无增益超限 / 迭代超限）────────────
     if (state.iterationCount >= t.maxIterations) {
       deps.trace.append({ ts: Date.now(), kind: 'stop', data: { reason: 'budget_exceeded' } });
+      
+      // 任务终止时更新 Memory 的 solutionSummary
+      const summary = `任务未完成（迭代次数超限，已完成 ${state.archivedSubgoals.length} 个子目标）`;
+      deps.memory.updateLastEntry(summary);
+      
       await config.onStop?.(state);
       // 保存状态再返回
       await deps.stateManager.save(deps.agentDir, state);
@@ -120,6 +150,11 @@ export async function runLoop(
     if (state.noProgressCount >= t.maxNoProgress) {
       const reason = '连续无增益，超出上限';
       deps.trace.append({ ts: Date.now(), kind: 'escalate', data: { reason } });
+      
+      // 任务终止时更新 Memory 的 solutionSummary
+      const summary = `任务未能完成（连续无增益，已完成 ${state.archivedSubgoals.length} 个子目标）`;
+      deps.memory.updateLastEntry(summary);
+      
       await config.onEscalate?.(reason, state);
       // 保存状态再返回
       await deps.stateManager.save(deps.agentDir, state);
@@ -129,6 +164,13 @@ export async function runLoop(
     // 检查目标是否完成
     if (!state.currentSubgoal && state.subgoals.length === 0) {
       deps.trace.append({ ts: Date.now(), kind: 'stop', data: { reason: 'goal_completed' } });
+      
+      // 任务完成时更新 Memory 的 solutionSummary
+      const summary = state.archivedSubgoals.length > 0
+        ? `已完成 ${state.archivedSubgoals.length} 个子目标: ${state.archivedSubgoals.join(', ')}`
+        : '任务已完成（无子目标）';
+      deps.memory.updateLastEntry(summary);
+      
       await config.onStop?.(state);
       // 保存状态再返回
       await deps.stateManager.save(deps.agentDir, state);
@@ -140,7 +182,19 @@ export async function runLoop(
       config.collectConfig,
       deps.primitives,
       (tag) => deps.trace.filterByTag(tag),
+      deps.skillsDir,  // 传递 skills 目录路径
     );
+    
+    // 记录 Collect 到 TerminalLog
+    const { content: truncatedContext, truncated } = truncateOutput(collectResult.context);
+    deps.terminalLog.append({
+      ts: Date.now(),
+      operation: 'collect' as OperationType,
+      input: JSON.stringify(config.collectConfig.sources),
+      output: truncatedContext,
+      truncated,
+    });
+    
     deps.trace.append({
       ts: Date.now(),
       kind: 'collect',
@@ -160,7 +214,19 @@ export async function runLoop(
         config.collectConfig,
         deps.primitives,
         (tag) => deps.trace.filterByTag(tag),
+        deps.skillsDir,
       );
+      
+      // 记录补采集到 TerminalLog
+      const { content: truncatedContext, truncated } = truncateOutput(collectResult.context);
+      deps.terminalLog.append({
+        ts: Date.now(),
+        operation: 'collect' as OperationType,
+        input: JSON.stringify(config.collectConfig.sources),
+        output: truncatedContext,
+        truncated,
+      });
+      
       deps.trace.append({
         ts: Date.now(),
         kind: 'collect',
@@ -188,17 +254,47 @@ export async function runLoop(
     // ── 4. [Plan 模式] LLMCall[Reason] → uncertainty 分支 ───────────────────
     if (state.mode === 'plan') {
       const taskDesc = state.currentSubgoal ?? state.goal;
+      
+      // 记录 LLMCall reason 到 TerminalLog
+      const llmInput = `Context:\n${collectResult.context}\n\nTask:\n${taskDesc}`;
       const reasonResult = await deps.llm.reason(collectResult.context, taskDesc);
+      
+      // 记录到 TerminalLog
+      const { content: truncatedOutput, truncated } = truncateOutput(reasonResult.result);
+      deps.terminalLog.append({
+        ts: Date.now(),
+        operation: 'llmcall' as OperationType,
+        input: llmInput,
+        output: truncatedOutput,
+        truncated,
+      });
+      
+      // 防御性检查：确保 uncertainty 对象存在
+      const uncertaintyScore = reasonResult.uncertainty?.score ?? 0.8;
+      const uncertaintyReasons = reasonResult.uncertainty?.reasons ?? ['uncertainty undefined'];
+      
       deps.trace.append({
         ts: Date.now(),
         kind: 'reason',
         data: { task: taskDesc, result: reasonResult.result },
-        uncertainty: reasonResult.uncertainty,
+        uncertainty: { score: uncertaintyScore, reasons: uncertaintyReasons },
       });
 
       // uncertainty 高 → 多候选或 Escalate
-      if (reasonResult.uncertainty.score > t.uncertaintyHigh) {
+      if (uncertaintyScore > t.uncertaintyHigh) {
+        // 记录 LLMCall reasonMulti 到 TerminalLog
+        const llmInput = `Context:\n${collectResult.context}\n\nTask:\n${taskDesc}`;
         const multi = await deps.llm.reasonMulti(collectResult.context, taskDesc);
+        
+        const { content: truncatedOutput, truncated } = truncateOutput(JSON.stringify(multi.candidates));
+        deps.terminalLog.append({
+          ts: Date.now(),
+          operation: 'llmcall' as OperationType,
+          input: llmInput,
+          output: truncatedOutput,
+          truncated,
+        });
+        
         deps.trace.append({
           ts: Date.now(),
           kind: 'reason',
@@ -206,15 +302,28 @@ export async function runLoop(
           uncertainty: multi.uncertainty,
         });
 
-        if (multi.uncertainty.score > t.uncertaintyHigh) {
-          const reason = `Reason 不确定性过高: ${multi.uncertainty.score.toFixed(2)}`;
+        const multiUncertaintyScore = multi.uncertainty?.score ?? 0.8;
+        if (multiUncertaintyScore > t.uncertaintyHigh) {
+          const reason = `Reason 不确定性过高: ${multiUncertaintyScore.toFixed(2)}`;
           deps.trace.append({ ts: Date.now(), kind: 'escalate', data: { reason } });
           await config.onEscalate?.(reason, state);
           return { status: 'escalated', reason, state };
         }
 
         // 多候选 → Judge(selection) 仲裁
-        const selResult = await deps.llm.judge('selection', collectResult.context, JSON.stringify(multi.candidates));
+        // 记录 LLMCall judge(selection) 到 TerminalLog
+        const selectionInput = JSON.stringify(multi.candidates);
+        const selResult = await deps.llm.judge('selection', collectResult.context, selectionInput);
+        
+        const { content: truncatedOutput2, truncated: truncated2 } = truncateOutput(selResult.result);
+        deps.terminalLog.append({
+          ts: Date.now(),
+          operation: 'llmcall' as OperationType,
+          input: selectionInput,
+          output: truncatedOutput2,
+          truncated: truncated2,
+        });
+        
         deps.trace.append({
           ts: Date.now(),
           kind: 'judge',
@@ -227,7 +336,19 @@ export async function runLoop(
       }
 
       // ── Judge(risk) → 不通过时 Escalate ─────────────────────────────────
-      const riskResult = await deps.llm.judge('risk', collectResult.context, String(state.custom['pendingProposal']));
+      // 记录 LLMCall judge(risk) 到 TerminalLog
+      const riskInput = String(state.custom['pendingProposal']);
+      const riskResult = await deps.llm.judge('risk', collectResult.context, riskInput);
+      
+      const { content: truncatedOutput3, truncated: truncated3 } = truncateOutput(riskResult.result);
+      deps.terminalLog.append({
+        ts: Date.now(),
+        operation: 'llmcall' as OperationType,
+        input: riskInput,
+        output: truncatedOutput3,
+        truncated: truncated3,
+      });
+      
       deps.trace.append({
         ts: Date.now(),
         kind: 'judge',
@@ -241,7 +362,8 @@ export async function runLoop(
         riskResult.result.toLowerCase().includes('approved') ||
         riskResult.result.toLowerCase().includes('yes');
 
-      if (!riskApproved || riskResult.uncertainty.score > t.uncertaintyHigh) {
+      const riskUncertaintyScore = riskResult.uncertainty?.score ?? 0.8;
+      if (!riskApproved || riskUncertaintyScore > t.uncertaintyHigh) {
         const reason = `Judge(risk) 拒绝或不确定性过高: ${riskResult.result}`;
         deps.trace.append({ ts: Date.now(), kind: 'escalate', data: { reason } });
         await config.onEscalate?.(reason, state);
@@ -310,8 +432,19 @@ export async function runLoop(
 
     // ── 6. [Review 模式] ───────────────────────────────────────────────────
     if (state.mode === 'review') {
-      const outcomeResult = await deps.llm.judge('outcome', collectResult.context,
-        `目标: ${state.currentSubgoal ?? state.goal}\n执行提案: ${state.custom['pendingProposal']}`);
+      // 记录 LLMCall judge(outcome) 到 TerminalLog
+      const outcomeInput = `目标: ${state.currentSubgoal ?? state.goal}\n执行提案: ${state.custom['pendingProposal']}`;
+      const outcomeResult = await deps.llm.judge('outcome', collectResult.context, outcomeInput);
+      
+      const { content: truncatedOutput, truncated } = truncateOutput(outcomeResult.result);
+      deps.terminalLog.append({
+        ts: Date.now(),
+        operation: 'llmcall' as OperationType,
+        input: outcomeInput,
+        output: truncatedOutput,
+        truncated,
+      });
+      
       deps.trace.append({
         ts: Date.now(),
         kind: 'judge',
@@ -324,7 +457,8 @@ export async function runLoop(
         outcomeResult.result.toLowerCase().includes('pass') ||
         outcomeResult.result.toLowerCase().includes('yes');
 
-      if (!achieved || outcomeResult.uncertainty.score > t.uncertaintyHigh) {
+      const outcomeUncertaintyScore = outcomeResult.uncertainty?.score ?? 0.8;
+      if (!achieved || outcomeUncertaintyScore > t.uncertaintyHigh) {
         state.noProgressCount++;
         // 进入 Recovery 或重新 Plan
         if (state.noProgressCount >= t.maxNoProgress) continue; // 下次迭代触发 Escalate
@@ -339,13 +473,6 @@ export async function runLoop(
 
       // 子目标完成，添加到 archivedSubgoals
       if (state.currentSubgoal) {
-        // 写入 Memory（长期记忆）：记录用户请求 + 解决结论
-        deps.memory.append({
-          userRequest: state.currentSubgoal,
-          solutionSummary: String(state.custom['pendingProposal'] ?? ''),
-          archivedSubgoal: state.currentSubgoal,
-        });
-        
         // 在 Trace 中追加 narrative 标记这次记忆更新
         deps.trace.append({
           ts: Date.now(),
