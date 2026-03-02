@@ -32,6 +32,7 @@ from typing import Optional, List, Dict, Any
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
 
 # 基础路径配置
 BASE_DIR = Path(__file__).parent.absolute()
@@ -68,6 +69,15 @@ run_state: Dict[str, Any] = {
 # SSE 客户端连接池
 sse_clients: List[asyncio.Queue] = []
 main_loop: Optional[asyncio.AbstractEventLoop] = None
+
+
+class RunTriggerRequest(BaseModel):
+    """前端触发运行时可选的过滤参数"""
+
+    start_date: Optional[str] = None  # YYYYMMDD
+    end_date: Optional[str] = None  # YYYYMMDD
+    max_results: Optional[int] = None
+    research_query: Optional[str] = None
 
 
 def broadcast(event: str, data: Dict[str, Any]):
@@ -119,13 +129,24 @@ def save_config(config: Dict[str, Any]):
         json.dump(config, f, ensure_ascii=False, indent=2)
 
 
-def run_pipeline_thread(run_id: str, config: Dict[str, Any]):
+def run_pipeline_thread(
+    run_id: str, config: Dict[str, Any], options: Optional[Dict[str, Any]] = None
+):
     """后台线程：执行完整 Agent 流水线，通过 broadcast 推送进度"""
     import requests as req
 
     SDK_URL = config["global_settings"]["sdk_url"]
     DEBUG_MODE = config["global_settings"].get("debug", False)
     today = datetime.now().strftime("%Y-%m-%d")
+
+    # 本次运行的可选过滤参数
+    options = options or {}
+    start_date = options.get("start_date")
+    end_date = options.get("end_date")
+    max_results = options.get("max_results") or config["global_settings"][
+        "fetch_max_papers"
+    ]
+    research_query = options.get("research_query")
 
     def debug_broadcast(event: str, data: Dict[str, Any]):
         """仅在debug模式下发送调试事件"""
@@ -211,24 +232,32 @@ def run_pipeline_thread(run_id: str, config: Dict[str, Any]):
             "fetcher_start",
             {
                 "categories": cats,
-                "max_results": config["global_settings"]["fetch_max_papers"],
+                "max_results": max_results,
+                "start_date": start_date,
+                "end_date": end_date,
                 "timestamp": datetime.now().isoformat(),
             },
         )
 
         try:
             fetch_script = BASE_DIR / "scripts" / "fetch_arxiv.py"
+            cmd = [
+                "python3",
+                str(fetch_script),
+                "-c",
+                cats_str,
+                "-m",
+                str(max_results),
+                "-o",
+                str(raw_file),
+            ]
+            if start_date:
+                cmd.extend(["-s", start_date])
+            if end_date:
+                cmd.extend(["-e", end_date])
+
             result = subprocess.run(
-                [
-                    "python3",
-                    str(fetch_script),
-                    "-c",
-                    cats_str,
-                    "-m",
-                    str(config["global_settings"]["fetch_max_papers"]),
-                    "-o",
-                    str(raw_file),
-                ],
+                cmd,
                 capture_output=True,
                 text=True,
                 timeout=120,
@@ -278,23 +307,31 @@ def run_pipeline_thread(run_id: str, config: Dict[str, Any]):
             {
                 "threshold": threshold,
                 "blacklist_count": len(blacklist),
+                "research_query": research_query,
                 "timestamp": datetime.now().isoformat(),
             },
         )
 
         # 直接使用本地脚本筛选论文，不依赖 SDK
         selected_file = DATA_DIR / f"selected_papers_{today}.json"
-        
+
         try:
             screen_script = BASE_DIR / "scripts" / "screen_papers.py"
+            cmd = [
+                "python3",
+                str(screen_script),
+                str(raw_file),
+                str(selected_file),
+                "--threshold",
+                str(threshold),
+                "--topics",
+                str(KB_DIR),
+            ]
+            if research_query:
+                cmd.extend(["--query", research_query])
+
             result = subprocess.run(
-                [
-                    "python3", str(screen_script),
-                    str(raw_file),
-                    str(selected_file),
-                    "--threshold", str(threshold),
-                    "--topics", str(KB_DIR)
-                ],
+                cmd,
                 capture_output=True,
                 text=True,
                 timeout=120,
@@ -685,13 +722,15 @@ async def run_status():
 
 
 @app.post("/api/run/trigger")
-async def trigger_run():
-    """手动触发一次完整流水线"""
+async def trigger_run(body: Optional[RunTriggerRequest] = None):
+    """手动触发一次完整流水线，可附带过滤参数"""
     if run_state["status"] == "running":
         raise HTTPException(status_code=409, detail="Pipeline already running")
 
     config = load_config()
     run_id = f"run_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+
+    options: Dict[str, Any] = body.dict() if body else {}
 
     run_state.update(
         {
@@ -701,15 +740,16 @@ async def trigger_run():
             "stage": None,
             "summary": {},
             "message": "",
+            "options": options,
         }
     )
 
     thread = threading.Thread(
-        target=run_pipeline_thread, args=(run_id, config), daemon=True
+        target=run_pipeline_thread, args=(run_id, config, options), daemon=True
     )
     thread.start()
 
-    return {"run_id": run_id, "status": "started"}
+    return {"run_id": run_id, "status": "started", "options": options}
 
 
 @app.get("/api/run/stream")

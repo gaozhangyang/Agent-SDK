@@ -16,7 +16,7 @@ import sys
 from pathlib import Path
 
 
-def screen_papers(raw_file, output_file, threshold=7.0, topics_dir=None):
+def screen_papers(raw_file, output_file, threshold=7.0, topics_dir=None, query=None):
     """
     筛选论文
     
@@ -51,7 +51,7 @@ def screen_papers(raw_file, output_file, threshold=7.0, topics_dir=None):
             except Exception as e:
                 print(f"Warning: Failed to load {meta_file}: {e}")
     
-    # 简单的关键词匹配评分
+    # 简单的关键词 / 检索意图匹配评分
     # 在实际生产环境中，这里应该调用 LLM 进行更准确的评分
     selected = []
     
@@ -77,6 +77,19 @@ def screen_papers(raw_file, output_file, threshold=7.0, topics_dir=None):
                 if keyword_lower in abstract:
                     score += 1.0
         
+        # 根据自定义检索描述打分（如果提供）
+        if query:
+            q = query.lower()
+            # 拆分为简单 token（空格分割），便于英文/拼音等检索
+            tokens = [tok for tok in q.split() if tok]
+            if not tokens:
+                tokens = [q]
+            for tok in tokens:
+                if tok in title:
+                    score += 2.0
+                if tok in abstract:
+                    score += 1.0
+
         # 根据提交日期打分（越新分数越高）
         submitted = paper.get('submitted', '')
         if submitted:
@@ -128,11 +141,13 @@ def main():
     parser.add_argument("--topics", "-k", type=str, 
                         default="knowledge_base",
                         help="Topics directory (default: knowledge_base)")
+    parser.add_argument("--query", "-q", type=str, default=None,
+                        help="Free-text research query used for extra relevance scoring")
     
     args = parser.parse_args()
     
     try:
-        screen_papers(args.input, args.output, args.threshold, args.topics)
+        screen_papers(args.input, args.output, args.threshold, args.topics, args.query)
     except Exception as e:
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)

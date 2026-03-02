@@ -1139,6 +1139,25 @@
     <div class="hero-eyebrow">AI-Powered Literature Intelligence</div>
     <h1 class="hero-title">每日追踪<br><em>前沿研究</em><br>动态</h1>
     <p class="hero-subtitle">自动从 arXiv 获取、筛选、精读最新论文，将知识沉淀到结构化的研究图谱之中。</p>
+    <!-- 运行过滤条件 -->
+    <div style="margin-bottom:1.5rem;padding:0.9rem 1rem;border:1px solid var(--border);border-radius:4px;background:rgba(255,255,255,0.6);display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0.75rem;grid-auto-rows:minmax(0,auto);">
+      <div style="display:flex;flex-direction:column;gap:0.25rem;">
+        <label style="font-family:'DM Mono',monospace;font-size:0.62rem;letter-spacing:0.08em;text-transform:uppercase;color:var(--warm-mid);">起始日期</label>
+        <input id="filterStartDate" type="date" style="font-size:0.78rem;padding:0.35rem 0.5rem;border-radius:3px;border:1px solid var(--border);background:white;">
+      </div>
+      <div style="display:flex;flex-direction:column;gap:0.25rem;">
+        <label style="font-family:'DM Mono',monospace;font-size:0.62rem;letter-spacing:0.08em;text-transform:uppercase;color:var(--warm-mid);">结束日期</label>
+        <input id="filterEndDate" type="date" style="font-size:0.78rem;padding:0.35rem 0.5rem;border-radius:3px;border:1px solid var(--border);background:white;">
+      </div>
+      <div style="display:flex;flex-direction:column;gap:0.25rem;">
+        <label style="font-family:'DM Mono',monospace;font-size:0.62rem;letter-spacing:0.08em;text-transform:uppercase;color:var(--warm-mid);">最大论文数</label>
+        <input id="filterMaxPapers" type="number" min="1" max="500" value="100" style="font-size:0.78rem;padding:0.35rem 0.5rem;border-radius:3px;border:1px solid var(--border);background:white;">
+      </div>
+      <div style="grid-column:1 / span 2;display:flex;flex-direction:column;gap:0.25rem;">
+        <label style="font-family:'DM Mono',monospace;font-size:0.62rem;letter-spacing:0.08em;text-transform:uppercase;color:var(--warm-mid);">研究内容描述（可选）</label>
+        <input id="filterResearchQuery" type="text" placeholder="例如：多模态 Agent 协作、长上下文推理等" style="font-size:0.78rem;padding:0.35rem 0.5rem;border-radius:3px;border:1px solid var(--border);background:white;">
+      </div>
+    </div>
     <div class="hero-stats">
       <div class="stat">
         <span class="stat-number" id="statPapers">0</span>
@@ -1724,9 +1743,30 @@ async function triggerRun() {
   const btn = document.getElementById('runBtn');
   btn.disabled = true;
   btn.textContent = '启动中...';
-  
+
+  // 收集过滤条件
+  const startDateInput = document.getElementById('filterStartDate');
+  const endDateInput = document.getElementById('filterEndDate');
+  const maxPapersInput = document.getElementById('filterMaxPapers');
+  const researchQueryInput = document.getElementById('filterResearchQuery');
+
+  const startDate = startDateInput?.value ? startDateInput.value.replace(/-/g, '') : null;
+  const endDate = endDateInput?.value ? endDateInput.value.replace(/-/g, '') : null;
+  const maxResults = maxPapersInput?.value ? parseInt(maxPapersInput.value, 10) : null;
+  const researchQuery = researchQueryInput?.value?.trim() || null;
+
+  const payload = {};
+  if (startDate) payload.start_date = startDate;
+  if (endDate) payload.end_date = endDate;
+  if (Number.isFinite(maxResults) && maxResults > 0) payload.max_results = maxResults;
+  if (researchQuery) payload.research_query = researchQuery;
+
   try {
-    const res = await fetch('/api/run/trigger', { method: 'POST' });
+    const res = await fetch('/api/run/trigger', { 
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: Object.keys(payload).length ? JSON.stringify(payload) : null
+    });
     const data = await res.json();
     
     if (res.ok) {
