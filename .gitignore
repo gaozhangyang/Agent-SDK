@@ -5,4 +5,5 @@ agent_chat_config.json
 .pip
 .ruff_cache
 node_modules
-survey_agent/data/pdfs
+data
+.agent
