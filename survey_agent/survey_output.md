@@ -1,10 +1,7 @@
-[step10] 2026-03-02T03:32:51.771Z
-$ I'll analyze the paper and create the summary. Let me start by reading the PDF content to extract the key information.
-```
-<minimax:tool_call>
-<invoke name="ReadPDF">
-parameter name="pdf_path">/Applications/workspace/ailab/research/agent_runtime_core_final/survey_agent/data/pdfs/2602.24289.pdf</parameter>
-<parameter name="start_page">1</parameter>
-<parameter name="max_pages">3</parameter>
-</invoke>
-</minimax:tool_call>
+[step14] 2026-03-02T03:33:32.595Z
+$ 我需要分析这篇论文。让我先提取PDF中的文本内容来理解论文的具体内容。
+[TOOL_CALL]
+{tool => "pdf_extractor.extract_pdf_text", args => {
+  --pdf_path "/Applications/workspace/ailab/research/agent_runtime_core_final/survey_agent/data/pdfs/2602.24289.pdf"
+}}
+[/TOOL_CALL]
