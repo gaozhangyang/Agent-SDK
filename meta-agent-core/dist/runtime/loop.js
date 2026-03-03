@@ -77,6 +77,19 @@ async function executeToolCalls(proposal, primitives) {
     return results.join('\n\n');
 }
 /**
+ * 检查 Reason 输出是否包含有效的工具调用
+ * 根据 change.md 问题：当 Reason 输出包含工具调用时，应该优先执行工具调用
+ * 而不是因为 uncertainty 高就直接 Escalate
+ *
+ * @param result Reason 输出的文本
+ * @returns true if the result contains valid tool calls
+ */
+function hasToolCalls(result) {
+    // 检查是否包含 <invoke name="X"> 格式的工具调用
+    const toolCallRegex = /<invoke name="(\w+)">/;
+    return toolCallRegex.test(result);
+}
+/**
  * 截断过长的输出，并在末尾标记
  */
 function truncateOutput(output) {
@@ -280,61 +293,82 @@ async function runLoop(state, config, deps, hooks) {
                 uncertainty: { score: uncertaintyScore, reasons: uncertaintyReasons },
             });
             // uncertainty 高 → 多候选或 Escalate
+            // 根据 change.md 问题：即使 uncertainty 高，如果原始 Reason 输出包含工具调用
+            // 也应该优先执行工具调用，而不是直接 Escalate
             if (uncertaintyScore > t.uncertaintyHigh) {
-                // 记录 LLMCall reasonMulti 到 TerminalLog
-                const llmInput = `Context:\n${collectResult.context}\n\nTask:\n${taskDesc}`;
-                const multi = await deps.llm.reasonMulti(collectResult.context, taskDesc);
-                const { content: truncatedOutput, truncated } = truncateOutput(JSON.stringify(multi.candidates));
-                const reasonMultiSeq = deps.terminalLog.append({
-                    ts: Date.now(),
-                    operation: 'llmcall',
-                    input: llmInput,
-                    output: truncatedOutput,
-                    truncated,
-                });
-                // 根据 change.md：LLMCall[ReasonMulti] 补完整记录，使用相同的 seq
-                deps.trace.append({
-                    ts: Date.now(),
-                    seq: reasonMultiSeq, // 使用 terminalLog 分配的相同 seq
-                    kind: 'reason',
-                    data: { multi: true, candidates: multi.candidates },
-                    input: llmInput, // 补齐 input
-                    output: truncatedOutput, // 补齐 output
-                    uncertainty: multi.uncertainty,
-                });
-                const multiUncertaintyScore = multi.uncertainty?.score ?? 0.8;
-                if (multiUncertaintyScore > t.uncertaintyHigh) {
-                    const reason = `Reason 不确定性过高: ${multiUncertaintyScore.toFixed(2)}`;
-                    deps.trace.append({ ts: Date.now(), kind: 'escalate', data: { reason } });
-                    await config.onEscalate?.(reason, state);
-                    return { status: 'escalated', reason, state };
+                // 检查原始 Reason 输出是否包含有效的工具调用
+                if (hasToolCalls(reasonResult.result)) {
+                    // 原始 Reason 输出包含工具调用，优先执行
+                    // 记录日志，说明虽然 uncertainty 高但仍然尝试执行工具调用
+                    console.log(`[Loop] Reason uncertainty=${uncertaintyScore.toFixed(2)} is high, but found tool calls in proposal, proceeding to execute`);
+                    deps.trace.append({
+                        ts: Date.now(),
+                        kind: 'narrative',
+                        data: {
+                            message: `Reason uncertainty=${uncertaintyScore.toFixed(2)} is high, but found tool calls in proposal, proceeding to execute`
+                        }
+                    });
+                    // 仍然将原始 Reason 输出存储到 pendingProposal，继续到 Execute 阶段
+                    state.custom['pendingProposal'] = reasonResult.result;
                 }
-                // 多候选 → Judge(selection) 仲裁
-                // 记录 LLMCall judge(selection) 到 TerminalLog
-                const selectionInput = JSON.stringify(multi.candidates);
-                const selResult = await deps.llm.judge('selection', collectResult.context, selectionInput);
-                const { content: truncatedOutput2, truncated: truncated2 } = truncateOutput(selResult.result);
-                const selectionSeq = deps.terminalLog.append({
-                    ts: Date.now(),
-                    operation: 'llmcall',
-                    input: selectionInput,
-                    output: truncatedOutput2,
-                    truncated: truncated2,
-                });
-                // 根据 change.md：Judge 调用补齐 judge_type 字段，使用相同的 seq
-                deps.trace.append({
-                    ts: Date.now(),
-                    seq: selectionSeq, // 使用 terminalLog 分配的相同 seq
-                    kind: 'judge',
-                    judge_type: 'selection', // 补齐 judge_type
-                    data: { type: 'selection', decision: selResult.result },
-                    input: selectionInput, // 补齐 input
-                    output: truncatedOutput2, // 补齐 output
-                    uncertainty: selResult.uncertainty,
-                });
-                state.custom['pendingProposal'] = selResult.result;
+                else {
+                    // 原始 Reason 输出没有工具调用，进入多候选分支
+                    // 记录 LLMCall reasonMulti 到 TerminalLog
+                    const llmInput = `Context:\n${collectResult.context}\n\nTask:\n${taskDesc}`;
+                    const multi = await deps.llm.reasonMulti(collectResult.context, taskDesc);
+                    const { content: truncatedOutput, truncated } = truncateOutput(JSON.stringify(multi.candidates));
+                    const reasonMultiSeq = deps.terminalLog.append({
+                        ts: Date.now(),
+                        operation: 'llmcall',
+                        input: llmInput,
+                        output: truncatedOutput,
+                        truncated,
+                    });
+                    // 根据 change.md：LLMCall[ReasonMulti] 补完整记录，使用相同的 seq
+                    deps.trace.append({
+                        ts: Date.now(),
+                        seq: reasonMultiSeq, // 使用 terminalLog 分配的相同 seq
+                        kind: 'reason',
+                        data: { multi: true, candidates: multi.candidates },
+                        input: llmInput, // 补齐 input
+                        output: truncatedOutput, // 补齐 output
+                        uncertainty: multi.uncertainty,
+                    });
+                    const multiUncertaintyScore = multi.uncertainty?.score ?? 0.8;
+                    if (multiUncertaintyScore > t.uncertaintyHigh) {
+                        const reason = `Reason 不确定性过高: ${multiUncertaintyScore.toFixed(2)}`;
+                        deps.trace.append({ ts: Date.now(), kind: 'escalate', data: { reason } });
+                        await config.onEscalate?.(reason, state);
+                        return { status: 'escalated', reason, state };
+                    }
+                    // 多候选 → Judge(selection) 仲裁
+                    // 记录 LLMCall judge(selection) 到 TerminalLog
+                    const selectionInput = JSON.stringify(multi.candidates);
+                    const selResult = await deps.llm.judge('selection', collectResult.context, selectionInput);
+                    const { content: truncatedOutput2, truncated: truncated2 } = truncateOutput(selResult.result);
+                    const selectionSeq = deps.terminalLog.append({
+                        ts: Date.now(),
+                        operation: 'llmcall',
+                        input: selectionInput,
+                        output: truncatedOutput2,
+                        truncated: truncated2,
+                    });
+                    // 根据 change.md：Judge 调用补齐 judge_type 字段，使用相同的 seq
+                    deps.trace.append({
+                        ts: Date.now(),
+                        seq: selectionSeq, // 使用 terminalLog 分配的相同 seq
+                        kind: 'judge',
+                        judge_type: 'selection', // 补齐 judge_type
+                        data: { type: 'selection', decision: selResult.result },
+                        input: selectionInput, // 补齐 input
+                        output: truncatedOutput2, // 补齐 output
+                        uncertainty: selResult.uncertainty,
+                    });
+                    state.custom['pendingProposal'] = selResult.result;
+                } // 结束 else (hasToolCalls 块)
             }
             else {
+                // uncertainty <= uncertaintyHigh，正常路径
                 state.custom['pendingProposal'] = reasonResult.result;
             }
             // ── Judge(risk) → 不通过时 Escalate ─────────────────────────────────
@@ -363,7 +397,9 @@ async function runLoop(state, config, deps, hooks) {
             const riskApproved = riskResult.result.toLowerCase().includes('通过') ||
                 riskResult.result.toLowerCase().includes('pass') ||
                 riskResult.result.toLowerCase().includes('approved') ||
-                riskResult.result.toLowerCase().includes('yes');
+                riskResult.result.toLowerCase().includes('yes') ||
+                riskResult.result.toLowerCase().includes('allow') || // 新增：允许执行
+                riskResult.result.toLowerCase().includes('允许');
             const riskUncertaintyScore = riskResult.uncertainty?.score ?? 0.8;
             if (!riskApproved || riskUncertaintyScore > t.uncertaintyHigh) {
                 const reason = `Judge(risk) 拒绝或不确定性过高: ${riskResult.result}`;

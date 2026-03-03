@@ -5,7 +5,8 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
-    "build": "tsc --noEmit",
+    "build": "tsc",
+    "build:check": "tsc --noEmit",
     "test": "jest --testPathPattern=tests/",
     "test:coverage": "jest --coverage",
     "example": "ts-node example/run.ts",
