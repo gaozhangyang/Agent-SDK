@@ -63,6 +63,10 @@ function parseTruncationConfig(agentMdContent) {
  * 截断过长的输出，并在末尾标记
  */
 function truncateOutput(output, maxLength = DEFAULT_MAX_OUTPUT_LENGTH) {
+    // 防御性检查：处理 undefined 或 null
+    if (output == null) {
+        return { content: '', truncated: false };
+    }
     if (output.length > maxLength) {
         const truncatedSizeKB = Math.round(maxLength / 1024);
         return {
@@ -90,6 +94,7 @@ function localPrimitives(coreDir, terminalLog, trace, truncationConfig) {
     // 通用日志记录函数
     const logOperation = (operation, input, output, options) => {
         const { content: truncatedOutput, truncated } = truncateOutput(output, maxOutputLength);
+        // 记录到 TerminalLog（返回分配的 seq）
         const seq = terminalLog.append({
             ts: Date.now(),
             operation,
@@ -98,28 +103,25 @@ function localPrimitives(coreDir, terminalLog, trace, truncationConfig) {
             ...options,
             truncated,
         });
-        // 同时写入 Trace（补齐 kind 字段）
-        // 根据 change.md：原子操作统一补 kind 为 "exec"
+        // 同时写入 Trace，使用与 TerminalLog 相同的 seq，确保一致性
+        // 注意：Trace 的写入由 loop.ts 在更高层级统一处理
+        // 但 primitives 层的操作也需要记录到 trace.jsonl，使用相同的 seq
         if (trace) {
-            const operationMap = {
-                'read': 'read',
-                'write': 'write',
-                'edit': 'edit',
-                'bash': 'bash',
-                'llmcall': 'llmcall',
-                'collect': 'collect',
-            };
-            const traceEntry = {
+            // 根据操作类型确定 kind 字段
+            let kind = 'exec';
+            if (operation === 'read' || operation === 'bash') {
+                kind = 'observe';
+            }
+            trace.append({
                 ts: Date.now(),
-                kind: 'exec', // 原子操作统一为 exec
-                data: { operation: operationMap[operation], input, output: truncatedOutput },
-                operation: operationMap[operation], // 补齐 operation 字段
+                seq, // 使用与 terminalLog 相同的 seq，确保一致性
+                kind,
+                data: { operation }, // 记录操作类型
+                operation, // 补齐 operation 字段
                 input,
-                output: truncatedOutput,
+                output: truncatedOutput, // 补齐 output 字段
                 durationMs: options?.durationMs,
-                terminal_seq: seq, // 关联 TerminalLog 序号
-            };
-            trace.append(traceEntry);
+            });
         }
     };
     return {

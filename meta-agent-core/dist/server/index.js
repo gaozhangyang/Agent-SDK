@@ -95,7 +95,7 @@ app.post('/run', async (req, res) => {
             console.log('[DEBUG] Received run request:', {
                 goal: goal.substring(0, 100),
                 workDir,
-                sources: collectConfig.sources.map((s) => s.query),
+                sources: collectConfig.sources?.map((s) => s.query) || [],
                 debug,
                 resume,
             });
@@ -115,6 +115,20 @@ app.post('/run', async (req, res) => {
         }
         else {
             // 创建新的 agent 实例
+            // 如果 resume=false，先清除旧的 state.json（强制使用新的 goal）
+            if (!resume) {
+                const fs = await Promise.resolve().then(() => __importStar(require('fs/promises')));
+                const oldStatePath = path_1.default.join(workDir, '.agent', 'state.json');
+                try {
+                    await fs.unlink(oldStatePath);
+                    if (debug) {
+                        console.log('[DEBUG] Cleared old state for fresh start');
+                    }
+                }
+                catch {
+                    // 文件不存在，忽略
+                }
+            }
             const baseUrl = llmConfig.baseUrl.replace(/\/$/, '');
             const provider = {
                 async complete(system, user) {
@@ -143,7 +157,7 @@ app.post('/run', async (req, res) => {
             // file 类型且为相对路径时，解析为 workDir 下的绝对路径
             const resolvedCollectConfig = {
                 ...collectConfig,
-                sources: collectConfig.sources.map((s) => s.type === 'file' && !path_1.default.isAbsolute(s.query)
+                sources: (collectConfig.sources || []).map((s) => s.type === 'file' && !path_1.default.isAbsolute(s.query)
                     ? { ...s, query: path_1.default.join(workDir, s.query) }
                     : s),
             };
@@ -161,11 +175,14 @@ app.post('/run', async (req, res) => {
             catch {
                 console.log(`[L0.5] AGENT.md 不存在，跳过自动加载`);
             }
+            // 从 AGENT.md 解析策略层配置（包括 permissions）
+            const strategiesConfig = (0, index_1.parseStrategiesConfig)(agentMdContent);
+            const permissions = strategiesConfig.permissions ?? 3; // 默认权限级别 3（高风险执行，支持网络访问）
             // 查找 skills 目录
             const skillsDir = path_1.default.join(workDir, 'skills');
             // 使用 createMetaAgent 创建 agent
             agent = await (0, index_1.createMetaAgent)(workDir, goal, provider, {
-                permissions: 2, // 默认权限级别
+                permissions, // 从 AGENT.md 的运行时配置读取权限级别
                 subgoals: subgoals.length > 0 ? subgoals : [goal],
                 logToFile: true, // 始终保存 Trace、Terminal Log、Memory 到 .agent/ 目录
                 collectConfig: resolvedCollectConfig,
@@ -209,7 +226,8 @@ app.post('/run', async (req, res) => {
     }
     catch (err) {
         const message = err instanceof Error ? err.message : String(err);
-        console.error('[SDK Error]', message);
+        const stack = err instanceof Error ? err.stack : '';
+        console.error('[SDK Error]', message, stack);
         res.status(500).json({ status: 'error', reason: message });
     }
 });

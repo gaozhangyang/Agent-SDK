@@ -119,6 +119,36 @@ review   → plan       # 目标变化或需重新规划
 3. Session 恢复：检测 `.agent/state.json` 是否存在，存在则恢复
 4. AGENT.md 作为静态上下文，在每次 LLMCall 时自动注入
 
+## 输出格式要求
+
+当需要执行工具时，**必须使用以下XML格式**输出工具调用：
+
+```
+<invoke name="Bash">
+  <parameter name="command">实际命令</parameter>
+</invoke>
+
+<invoke name="Read">
+  <parameter name="path">文件路径</parameter>
+</invoke>
+
+<invoke name="Write">
+  <parameter name="path">文件路径</parameter>
+  <parameter name="content">文件内容</parameter>
+</invoke>
+
+<invoke name="Edit">
+  <parameter name="path">文件路径</parameter>
+  <parameter name="old">需要替换的旧内容</parameter>
+  <parameter name="next">替换后的新内容</parameter>
+</invoke>
+```
+
+**重要**：
+- 必须使用 `<invoke name="...">` 格式包裹工具调用
+- 每个参数必须使用 `<parameter name="参数名">参数值</parameter>` 格式
+- 不要输出纯文本格式的命令（如 `bash cd /path && ls`），否则命令将不会被执行
+
 ## 运行时配置
 
 以下配置在 AGENT.md 中定义，**apiKey 可通过环境变量覆盖**（如 `LLM_API_KEY`）：

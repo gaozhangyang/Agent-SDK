@@ -46,6 +46,7 @@ Object.defineProperty(exports, "createErrorClassifier", { enumerable: true, get:
 function parseStrategiesConfig(agentMdContent) {
     const defaultConfig = {
         level: 'L1',
+        permissions: 2, // 默认权限级别：受控执行（常规 bash 命令）
         mode_fsm: 'enabled',
         permission_fsm: 'enabled',
         harness: 'standard',
@@ -70,6 +71,9 @@ function parseStrategiesConfig(agentMdContent) {
             const config = { ...defaultConfig };
             if (parsed.level)
                 config.level = parsed.level;
+            if (typeof parsed.permissions === 'number' && parsed.permissions >= 0 && parsed.permissions <= 4) {
+                config.permissions = parsed.permissions;
+            }
             if (parsed.mode_fsm)
                 config.mode_fsm = parsed.mode_fsm;
             if (parsed.permission_fsm)
@@ -98,6 +102,14 @@ function parseStrategiesConfig(agentMdContent) {
     const levelMatch = strategiesContent.match(/level:\s*(L\d+)/i);
     if (levelMatch) {
         config.level = levelMatch[1];
+    }
+    // 解析 permissions
+    const permissionsMatch = strategiesContent.match(/permissions:\s*(\d+)/i);
+    if (permissionsMatch) {
+        const permLevel = parseInt(permissionsMatch[1], 10);
+        if (permLevel >= 0 && permLevel <= 4) {
+            config.permissions = permLevel;
+        }
     }
     // 解析 mode_fsm
     const modeFsmMatch = strategiesContent.match(/mode_fsm:\s*(enabled|disabled)/i);
@@ -164,6 +176,7 @@ async function createMetaAgent(projectPath, goal, llmProvider, options) {
     // 创建全局序号管理器（统一 seq 序号空间）
     const seqManager = new trace_1.GlobalSeqManager(traceLogPath);
     const trace = new trace_1.Trace(traceLogPath);
+    trace.setSeqManager(seqManager); // 将 seqManager 注入到 Trace
     // 将 seqManager 注入到 TerminalLog
     const terminalLog = new trace_1.TerminalLog(traceLogPath, terminalLogPath, projectPath);
     terminalLog.setSeqManager(seqManager);

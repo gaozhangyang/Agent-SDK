@@ -14,6 +14,73 @@ import type { Primitives } from '../core/primitives';
 const MAX_OUTPUT_LENGTH = 100 * 1024;
 
 /**
+ * 解析并执行工具调用
+ * 根据 change.md 问题2：LLM 返回的工具调用需要实际执行
+ * 
+ * @param proposal LLM 返回的包含工具调用的提案
+ * @param primitives 执行工具的原语
+ * @returns 执行结果字符串
+ */
+async function executeToolCalls(proposal: string, primitives: Primitives): Promise<string> {
+  // 解析 <invoke name="X">...</invoke> 格式的工具调用
+  const toolCallRegex = /<invoke name="(\w+)">([\s\S]*?)<\/invoke>/g;
+  let match;
+  let results: string[] = [];
+  
+  while ((match = toolCallRegex.exec(proposal)) !== null) {
+    const toolName = match[1];
+    const toolArgs = match[2];
+    
+    try {
+      let result: string;
+      if (toolName === 'Bash') {
+        // 解析 command 参数
+        const commandMatch = toolArgs.match(/<parameter name="command">([\s\S]*?)<\/parameter>/);
+        const command = commandMatch ? commandMatch[1] : toolArgs.trim();
+        result = await primitives.bash(command);
+      } else if (toolName === 'Read') {
+        // 解析 path 参数
+        const pathMatch = toolArgs.match(/<parameter name="path">([\s\S]*?)<\/parameter>/);
+        const path = pathMatch ? pathMatch[1] : toolArgs.trim();
+        result = await primitives.read(path);
+      } else if (toolName === 'Write') {
+        // 解析 path 和 content 参数
+        const pathMatch = toolArgs.match(/<parameter name="path">([\s\S]*?)<\/parameter>/);
+        const contentMatch = toolArgs.match(/<parameter name="content">([\s\S]*?)<\/parameter>/);
+        if (pathMatch && contentMatch) {
+          await primitives.write(pathMatch[1], contentMatch[1]);
+          result = `[Write] Written to ${pathMatch[1]}`;
+        } else {
+          result = `[Write] Failed: missing path or content parameter`;
+        }
+      } else if (toolName === 'Edit') {
+        // 解析 path, old, next 参数
+        const pathMatch = toolArgs.match(/<parameter name="path">([\s\S]*?)<\/parameter>/);
+        const oldMatch = toolArgs.match(/<parameter name="old">([\s\S]*?)<\/parameter>/);
+        const nextMatch = toolArgs.match(/<parameter name="next">([\s\S]*?)<\/parameter>/);
+        if (pathMatch && oldMatch && nextMatch) {
+          await primitives.edit(pathMatch[1], oldMatch[1], nextMatch[1]);
+          result = `[Edit] Edited ${pathMatch[1]}`;
+        } else {
+          result = `[Edit] Failed: missing required parameters`;
+        }
+      } else {
+        result = `[${toolName}] Unknown tool`;
+      }
+      results.push(result);
+    } catch (error: any) {
+      results.push(`[${toolName} failed]: ${error.message}`);
+    }
+  }
+  
+  if (results.length === 0) {
+    return '[No tool calls found in proposal]';
+  }
+  
+  return results.join('\n\n');
+}
+
+/**
  * 截断过长的输出，并在末尾标记
  */
 function truncateOutput(output: string | undefined | null): { content: string; truncated: boolean } {
@@ -192,7 +259,7 @@ export async function runLoop(
     
     // 记录 Collect 到 TerminalLog 和 Trace
     const { content: truncatedContext, truncated } = truncateOutput(collectResult.context);
-    deps.terminalLog.append({
+    const collectSeq = deps.terminalLog.append({
       ts: Date.now(),
       operation: 'collect' as OperationType,
       input: JSON.stringify(config.collectConfig.sources),
@@ -200,9 +267,10 @@ export async function runLoop(
       truncated,
     });
     
-    // 根据 change.md：Collect 补完整记录
+    // 根据 change.md：Collect 补完整记录，使用与 terminalLog 相同的 seq
     deps.trace.append({
       ts: Date.now(),
+      seq: collectSeq,  // 使用 terminalLog 分配的相同 seq，确保一致性
       kind: 'collect',
       data: { sources: config.collectConfig.sources.map((s: CollectSource) => s.query) },
       input: JSON.stringify(config.collectConfig.sources),  // 补齐 input
@@ -227,7 +295,7 @@ export async function runLoop(
       
       // 记录补采集到 TerminalLog 和 Trace
       const { content: truncatedContext, truncated } = truncateOutput(collectResult.context);
-      deps.terminalLog.append({
+      const retryCollectSeq = deps.terminalLog.append({
         ts: Date.now(),
         operation: 'collect' as OperationType,
         input: JSON.stringify(config.collectConfig.sources),
@@ -235,9 +303,10 @@ export async function runLoop(
         truncated,
       });
       
-      // 根据 change.md：Collect 补完整记录
+      // 根据 change.md：Collect 补完整记录，使用与 terminalLog 相同的 seq
       deps.trace.append({
         ts: Date.now(),
+        seq: retryCollectSeq,  // 使用 terminalLog 分配的相同 seq，确保一致性
         kind: 'collect',
         data: { retry: collectRetry },
         input: JSON.stringify(config.collectConfig.sources),  // 补齐 input
@@ -272,7 +341,7 @@ export async function runLoop(
       
       // 记录到 TerminalLog
       const { content: truncatedOutput, truncated } = truncateOutput(reasonResult.result);
-      deps.terminalLog.append({
+      const llmcallSeq = deps.terminalLog.append({
         ts: Date.now(),
         operation: 'llmcall' as OperationType,
         input: llmInput,
@@ -284,9 +353,10 @@ export async function runLoop(
       const uncertaintyScore = reasonResult.uncertainty?.score ?? 0.8;
       const uncertaintyReasons = reasonResult.uncertainty?.reasons ?? ['uncertainty undefined'];
       
-      // 根据 change.md：LLMCall[Reason] 补完整记录
+      // 根据 change.md：LLMCall[Reason] 补完整记录，使用相同的 seq
       deps.trace.append({
         ts: Date.now(),
+        seq: llmcallSeq,  // 使用 terminalLog 分配的相同 seq
         kind: 'reason',
         data: { task: taskDesc, result: reasonResult.result },
         input: llmInput,  // 补齐 input
@@ -301,7 +371,7 @@ export async function runLoop(
         const multi = await deps.llm.reasonMulti(collectResult.context, taskDesc);
         
         const { content: truncatedOutput, truncated } = truncateOutput(JSON.stringify(multi.candidates));
-        deps.terminalLog.append({
+        const reasonMultiSeq = deps.terminalLog.append({
           ts: Date.now(),
           operation: 'llmcall' as OperationType,
           input: llmInput,
@@ -309,9 +379,10 @@ export async function runLoop(
           truncated,
         });
         
-        // 根据 change.md：LLMCall[ReasonMulti] 补完整记录
+        // 根据 change.md：LLMCall[ReasonMulti] 补完整记录，使用相同的 seq
         deps.trace.append({
           ts: Date.now(),
+          seq: reasonMultiSeq,  // 使用 terminalLog 分配的相同 seq
           kind: 'reason',
           data: { multi: true, candidates: multi.candidates },
           input: llmInput,  // 补齐 input
@@ -333,7 +404,7 @@ export async function runLoop(
         const selResult = await deps.llm.judge('selection', collectResult.context, selectionInput);
         
         const { content: truncatedOutput2, truncated: truncated2 } = truncateOutput(selResult.result);
-        deps.terminalLog.append({
+        const selectionSeq = deps.terminalLog.append({
           ts: Date.now(),
           operation: 'llmcall' as OperationType,
           input: selectionInput,
@@ -341,9 +412,10 @@ export async function runLoop(
           truncated: truncated2,
         });
         
-        // 根据 change.md：Judge 调用补齐 judge_type 字段
+        // 根据 change.md：Judge 调用补齐 judge_type 字段，使用相同的 seq
         deps.trace.append({
           ts: Date.now(),
+          seq: selectionSeq,  // 使用 terminalLog 分配的相同 seq
           kind: 'judge',
           judge_type: 'selection',  // 补齐 judge_type
           data: { type: 'selection', decision: selResult.result },
@@ -362,7 +434,7 @@ export async function runLoop(
       const riskResult = await deps.llm.judge('risk', collectResult.context, riskInput);
       
       const { content: truncatedOutput3, truncated: truncated3 } = truncateOutput(riskResult.result);
-      deps.terminalLog.append({
+      const riskSeq = deps.terminalLog.append({
         ts: Date.now(),
         operation: 'llmcall' as OperationType,
         input: riskInput,
@@ -370,9 +442,10 @@ export async function runLoop(
         truncated: truncated3,
       });
       
-      // 根据 change.md：Judge 调用补齐 judge_type 字段
+      // 根据 change.md：Judge 调用补齐 judge_type 字段，使用相同的 seq
       deps.trace.append({
         ts: Date.now(),
+        seq: riskSeq,  // 使用 terminalLog 分配的相同 seq
         kind: 'judge',
         judge_type: 'risk',  // 补齐 judge_type
         data: { type: 'risk', decision: riskResult.result },
@@ -437,12 +510,30 @@ export async function runLoop(
 
       // 执行（写 Trace exec 条目）
       // 注意：这里需要记录 terminal_seq
-      const terminalSeq = deps.terminalLog.getSeq();
+      
+      // 根据 change.md 问题2：实际执行工具调用
+      // 解析并执行 LLM 返回的 <invoke name="X">...</invoke> 格式的工具调用
+      const execResult = await executeToolCalls(proposal, deps.primitives);
+      
+      // 将执行结果存储到 state 中，供 Review 模式使用
+      state.custom['lastExecResult'] = execResult;
+      
+      // 记录执行结果到 TerminalLog
+      const { content: truncatedExecResult, truncated: execTruncated } = truncateOutput(execResult);
+      const execSeq = deps.terminalLog.append({
+        ts: Date.now(),
+        operation: 'bash' as OperationType,
+        input: proposal,
+        output: truncatedExecResult,
+        truncated: execTruncated,
+      });
+      
+      // 记录到 trace，使用相同的 seq
       deps.trace.append({
         ts: Date.now(),
+        seq: execSeq,  // 使用 terminalLog 分配的相同 seq
         kind: 'exec',
-        data: { proposal },
-        terminal_seq: terminalSeq > 0 ? terminalSeq : undefined,
+        data: { proposal, result: execResult },
       });
 
       // 切换到 Review
@@ -457,12 +548,15 @@ export async function runLoop(
 
     // ── 6. [Review 模式] ───────────────────────────────────────────────────
     if (state.mode === 'review') {
+      // 根据 change.md 问题2：将执行结果包含在 Review 的输入中
+      const execResult = String(state.custom['lastExecResult'] ?? '[No execution result]');
+      
       // 记录 LLMCall judge(outcome) 到 TerminalLog
-      const outcomeInput = `目标: ${state.currentSubgoal ?? state.goal}\n执行提案: ${state.custom['pendingProposal']}`;
+      const outcomeInput = `目标: ${state.currentSubgoal ?? state.goal}\n执行提案: ${state.custom['pendingProposal']}\n执行结果:\n${execResult}`;
       const outcomeResult = await deps.llm.judge('outcome', collectResult.context, outcomeInput);
       
       const { content: truncatedOutput, truncated } = truncateOutput(outcomeResult.result);
-      deps.terminalLog.append({
+      const outcomeSeq = deps.terminalLog.append({
         ts: Date.now(),
         operation: 'llmcall' as OperationType,
         input: outcomeInput,
@@ -470,9 +564,10 @@ export async function runLoop(
         truncated,
       });
       
-      // 根据 change.md：Judge 调用补齐 judge_type 字段
+      // 根据 change.md：Judge 调用补齐 judge_type 字段，使用相同的 seq
       deps.trace.append({
         ts: Date.now(),
+        seq: outcomeSeq,  // 使用 terminalLog 分配的相同 seq
         kind: 'judge',
         judge_type: 'outcome',  // 补齐 judge_type
         data: { type: 'outcome', decision: outcomeResult.result },

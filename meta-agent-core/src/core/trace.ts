@@ -19,7 +19,7 @@ export type Uncertainty = {
 // Trace：推理书，记录"为什么"
 export type TraceEntry = {
   ts: number;
-  seq: number;           // 全局自增序号
+  seq?: number;           // 全局自增序号（可选，由 append 方法自动分配）
   kind: 'collect' | 'reason' | 'judge' | 'exec' | 'observe' |
         'state' | 'escalate' | 'stop' | 'interrupt' | 'narrative';
   data: unknown;
@@ -166,10 +166,11 @@ export class Trace {
 
   /**
    * 追加 Trace 条目
-   * @param entry 忽略 seq 字段，由全局序号管理器分配
+   * @param entry 忽略 seq 字段，由全局序号管理器分配（除非显式传入）
    */
-  append(entry: Omit<TraceEntry, 'seq'>): number {
-    const seq = this.seqManager.next();
+  append(entry: TraceEntry): number {
+    // 如果传入 seq，使用传入的 seq；否则由全局序号管理器分配
+    const seq = entry.seq ?? this.seqManager.next();
     const fullEntry: TraceEntry = { ...entry, seq };
     this.entries.push(fullEntry);
     // 创建一个链接到上一个写入的 promise，确保顺序
@@ -201,6 +202,13 @@ export class Trace {
 
   getSeq(): number {
     return this.seqManager.get();
+  }
+
+  /**
+   * 设置全局序号管理器（由外部注入，实现与 TerminalLog 共享）
+   */
+  setSeqManager(seqManager: GlobalSeqManager): void {
+    this.seqManager = seqManager;
   }
 
   /**
@@ -657,25 +665,31 @@ export class TerminalLog {
   /**
    * 追加 Terminal Entry
    * @param entry 忽略 seq 字段，由全局序号管理器分配
+   * @param writeTrace 是否同时写入 trace.jsonl（默认 false，避免重复记录）
+   *                   只有 loop.ts 层的操作才需要写入 trace.jsonl
    */
-  append(entry: Omit<TerminalEntry, 'seq'>): number {
+  append(entry: Omit<TerminalEntry, 'seq'>, writeTrace: boolean = false): number {
     const seq = this.seqManager.next();
     const fullEntry: TerminalEntry = { ...entry, seq };
     this.entries.push(fullEntry);
     
-    // 1. 写入 JSON 格式（trace.jsonl）
-    this.lastWritePromise = this.lastWritePromise.then(() => {
-      return this.appendToFile(fullEntry);
-    });
-    this.pendingWrites.push(this.lastWritePromise);
-    
-    // 2. 写入 Markdown 友好格式（terminal.md）
+    // 1. 先写入 Markdown 友好格式（terminal.md）
     // 初始化路径别名（首次写入时）
     if (this.pathAliases.size === 0) {
       this.initPathAliases();
     }
     const mdContent = this.formatAsMarkdown(fullEntry);
     this.writeMarkdown(mdContent);
+    
+    // 2. 可选：写入 JSON 格式（trace.jsonl）
+    // 只有明确指定 writeTrace=true 时才写入，避免重复记录
+    // trace.jsonl 主要由 trace.append() 写入
+    if (writeTrace) {
+      this.lastWritePromise = this.lastWritePromise.then(() => {
+        return this.appendToFile(fullEntry);
+      });
+      this.pendingWrites.push(this.lastWritePromise);
+    }
     
     return seq; // 返回分配的 seq
   }

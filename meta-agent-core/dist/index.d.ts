@@ -29,6 +29,7 @@ export { createErrorClassifier };
  */
 export interface AgentStrategiesConfig {
     level?: 'L0' | 'L1' | 'L2' | 'L3';
+    permissions?: PermissionLevel;
     mode_fsm?: 'enabled' | 'disabled';
     permission_fsm?: 'enabled' | 'disabled';
     harness?: 'standard' | 'aggressive' | 'disabled';

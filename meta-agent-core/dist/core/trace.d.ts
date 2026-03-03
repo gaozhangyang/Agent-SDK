@@ -10,7 +10,7 @@ export type Uncertainty = {
 };
 export type TraceEntry = {
     ts: number;
-    seq: number;
+    seq?: number;
     kind: 'collect' | 'reason' | 'judge' | 'exec' | 'observe' | 'state' | 'escalate' | 'stop' | 'interrupt' | 'narrative';
     data: unknown;
     confidence?: Confidence;
@@ -79,14 +79,18 @@ export declare class Trace {
     private appendToFile;
     /**
      * 追加 Trace 条目
-     * @param entry 忽略 seq 字段，由全局序号管理器分配
+     * @param entry 忽略 seq 字段，由全局序号管理器分配（除非显式传入）
      */
-    append(entry: Omit<TraceEntry, 'seq'>): number;
+    append(entry: TraceEntry): number;
     flush(): Promise<void>;
     filterByTag(tag: string): TraceEntry[];
     all(): TraceEntry[];
     serialize(): string;
     getSeq(): number;
+    /**
+     * 设置全局序号管理器（由外部注入，实现与 TerminalLog 共享）
+     */
+    setSeqManager(seqManager: GlobalSeqManager): void;
     /**
      * 获取全局序号管理器（供 TerminalLog 共享）
      */
@@ -172,8 +176,10 @@ export declare class TerminalLog {
     /**
      * 追加 Terminal Entry
      * @param entry 忽略 seq 字段，由全局序号管理器分配
+     * @param writeTrace 是否同时写入 trace.jsonl（默认 false，避免重复记录）
+     *                   只有 loop.ts 层的操作才需要写入 trace.jsonl
      */
-    append(entry: Omit<TerminalEntry, 'seq'>): number;
+    append(entry: Omit<TerminalEntry, 'seq'>, writeTrace?: boolean): number;
     flush(): Promise<void>;
     all(): TerminalEntry[];
     serialize(): string;

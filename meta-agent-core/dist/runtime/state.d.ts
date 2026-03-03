@@ -27,6 +27,7 @@ export declare class StateManager {
     /**
      * 加载 State
      * 读取 {agentDir}/state.json，不存在返回 null，解析失败也返回 null
+     * 如果字段缺失，填充默认值
      */
     load(agentDir: string): Promise<AgentState | null>;
     /**

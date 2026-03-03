@@ -22,19 +22,25 @@ async function collect(config, primitives, traceFilterFn, skillsDir) {
                 content = entries.map(e => JSON.stringify(e.data)).join('\n');
             }
             else if (source.type === 'skills' && skillsDir) {
-                // skills 类型：在 skillsDir 中搜索匹配的文件
+                // skills 类型：在 skillsDir/<name>/SKILL.md 中搜索匹配的文件
                 // query 可以是文件名（不含 .md）或完整文件名
                 try {
-                    // 先尝试直接读取 query 指定的文件
-                    const skillFile = source.query.endsWith('.md')
-                        ? source.query
-                        : `${source.query}.md`;
-                    const skillPath = `${skillsDir}/${skillFile}`;
-                    content = await primitives.read(skillPath);
+                    // 先尝试直接读取 query 指定的文件（支持两种格式）
+                    // 1. skillsDir/<query>/SKILL.md（如 arxiv_api -> skills/arxiv_api/SKILL.md）
+                    // 2. skillsDir/<query>.md（如 arxiv_api -> skills/arxiv_api.md）
+                    let skillPath = `${skillsDir}/${source.query}/SKILL.md`;
+                    try {
+                        content = await primitives.read(skillPath);
+                    }
+                    catch {
+                        // 如果不存在，尝试不带 /SKILL.md 后缀
+                        skillPath = `${skillsDir}/${source.query}.md`;
+                        content = await primitives.read(skillPath);
+                    }
                 }
                 catch {
                     // 如果直接读取失败，使用 bash grep 搜索 skills 目录
-                    const searchCmd = `ls ${skillsDir}/*.md 2>/dev/null | xargs grep -l "${source.query}" 2>/dev/null | head -3`;
+                    const searchCmd = `ls ${skillsDir}/*.md ${skillsDir}/*/SKILL.md 2>/dev/null | xargs grep -l "${source.query}" 2>/dev/null | head -3`;
                     const matchedFiles = await primitives.bash(searchCmd);
                     if (matchedFiles && matchedFiles.trim()) {
                         // 读取匹配的第一个文件

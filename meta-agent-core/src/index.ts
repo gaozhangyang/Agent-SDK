@@ -235,6 +235,7 @@ export async function createMetaAgent(
   const seqManager = new GlobalSeqManager(traceLogPath);
   
   const trace = new Trace(traceLogPath);
+  trace.setSeqManager(seqManager);  // 将 seqManager 注入到 Trace
   // 将 seqManager 注入到 TerminalLog
   const terminalLog = new TerminalLog(traceLogPath, terminalLogPath, projectPath);
   terminalLog.setSeqManager(seqManager);

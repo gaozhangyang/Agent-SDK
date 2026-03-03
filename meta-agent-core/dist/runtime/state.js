@@ -31,12 +31,21 @@ class StateManager {
     /**
      * 加载 State
      * 读取 {agentDir}/state.json，不存在返回 null，解析失败也返回 null
+     * 如果字段缺失，填充默认值
      */
     async load(agentDir) {
         const statePath = path_1.default.join(agentDir, 'state.json');
         try {
             const content = await promises_1.default.readFile(statePath, 'utf-8');
-            return JSON.parse(content);
+            const parsed = JSON.parse(content);
+            // 填充缺失的字段（向后兼容）
+            if (!parsed.archivedSubgoals) {
+                parsed.archivedSubgoals = [];
+            }
+            if (!parsed.custom) {
+                parsed.custom = {};
+            }
+            return parsed;
         }
         catch {
             return null;

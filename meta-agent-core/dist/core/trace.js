@@ -122,10 +122,11 @@ class Trace {
     }
     /**
      * 追加 Trace 条目
-     * @param entry 忽略 seq 字段，由全局序号管理器分配
+     * @param entry 忽略 seq 字段，由全局序号管理器分配（除非显式传入）
      */
     append(entry) {
-        const seq = this.seqManager.next();
+        // 如果传入 seq，使用传入的 seq；否则由全局序号管理器分配
+        const seq = entry.seq ?? this.seqManager.next();
         const fullEntry = { ...entry, seq };
         this.entries.push(fullEntry);
         // 创建一个链接到上一个写入的 promise，确保顺序
@@ -152,6 +153,12 @@ class Trace {
     }
     getSeq() {
         return this.seqManager.get();
+    }
+    /**
+     * 设置全局序号管理器（由外部注入，实现与 TerminalLog 共享）
+     */
+    setSeqManager(seqManager) {
+        this.seqManager = seqManager;
     }
     /**
      * 获取全局序号管理器（供 TerminalLog 共享）
@@ -369,19 +376,27 @@ class TerminalLog {
         ];
         // 规则4: 多行内容、含 Markdown 语法的内容放进 <details> 块
         // 注意：内层代码块使用四个反引号，避免与外层 Markdown 环境冲突
+        // 修改：使用两个独立的折叠块，分别显示 input 和 output
         if (hasFullContent) {
-            lines.push('');
-            lines.push('<details><summary>完整 input / output</summary>');
-            lines.push('');
-            if (entry.input && needsDetailsBlock(entry.input)) {
+            // 分别检查 input 和 output 是否需要放进 details 块
+            const needsInputDetails = entry.input && needsDetailsBlock(entry.input);
+            const needsOutputDetails = entry.output && needsDetailsBlock(entry.output);
+            if (needsInputDetails && entry.input) {
+                lines.push('');
+                lines.push('<details><summary>完整的input</summary>');
+                lines.push('');
                 lines.push('### input');
                 lines.push('');
                 lines.push('````');
                 lines.push(entry.input);
                 lines.push('````');
                 lines.push('');
+                lines.push('</details>');
             }
-            if (entry.output && needsDetailsBlock(entry.output)) {
+            if (needsOutputDetails) {
+                lines.push('');
+                lines.push('<details><summary>完整的output</summary>');
+                lines.push('');
                 lines.push('### output');
                 lines.push('');
                 // 如果是模板内容，用 markdown 代码块包裹（避免 h1 标题污染层级）
@@ -396,10 +411,13 @@ class TerminalLog {
                     lines.push('````');
                 }
                 lines.push('');
+                lines.push('</details>');
             }
-            lines.push('</details>');
-            // 规则5: </details> 后必须有空行
-            lines.push('');
+            // 只有当 input 或 output 有内容时才添加空行
+            if (needsInputDetails || needsOutputDetails) {
+                // 规则5: </details> 后必须有空行
+                lines.push('');
+            }
         }
         return lines.join('\n');
     }
@@ -571,23 +589,29 @@ class TerminalLog {
     /**
      * 追加 Terminal Entry
      * @param entry 忽略 seq 字段，由全局序号管理器分配
+     * @param writeTrace 是否同时写入 trace.jsonl（默认 false，避免重复记录）
+     *                   只有 loop.ts 层的操作才需要写入 trace.jsonl
      */
-    append(entry) {
+    append(entry, writeTrace = false) {
         const seq = this.seqManager.next();
         const fullEntry = { ...entry, seq };
         this.entries.push(fullEntry);
-        // 1. 写入 JSON 格式（trace.jsonl）
-        this.lastWritePromise = this.lastWritePromise.then(() => {
-            return this.appendToFile(fullEntry);
-        });
-        this.pendingWrites.push(this.lastWritePromise);
-        // 2. 写入 Markdown 友好格式（terminal.md）
+        // 1. 先写入 Markdown 友好格式（terminal.md）
         // 初始化路径别名（首次写入时）
         if (this.pathAliases.size === 0) {
             this.initPathAliases();
         }
         const mdContent = this.formatAsMarkdown(fullEntry);
         this.writeMarkdown(mdContent);
+        // 2. 可选：写入 JSON 格式（trace.jsonl）
+        // 只有明确指定 writeTrace=true 时才写入，避免重复记录
+        // trace.jsonl 主要由 trace.append() 写入
+        if (writeTrace) {
+            this.lastWritePromise = this.lastWritePromise.then(() => {
+                return this.appendToFile(fullEntry);
+            });
+            this.pendingWrites.push(this.lastWritePromise);
+        }
         return seq; // 返回分配的 seq
     }
     // 等待所有待处理的写入完成（按顺序）

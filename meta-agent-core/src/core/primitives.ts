@@ -122,6 +122,8 @@ export function localPrimitives(
     options?: { command?: string; exitCode?: number; durationMs?: number }
   ) => {
     const { content: truncatedOutput, truncated } = truncateOutput(output, maxOutputLength);
+    
+    // 记录到 TerminalLog（返回分配的 seq）
     const seq = terminalLog.append({
       ts: Date.now(),
       operation,
@@ -131,29 +133,26 @@ export function localPrimitives(
       truncated,
     });
     
-    // 同时写入 Trace（补齐 kind 字段）
-    // 根据 change.md：原子操作统一补 kind 为 "exec"
+    // 同时写入 Trace，使用与 TerminalLog 相同的 seq，确保一致性
+    // 注意：Trace 的写入由 loop.ts 在更高层级统一处理
+    // 但 primitives 层的操作也需要记录到 trace.jsonl，使用相同的 seq
     if (trace) {
-      const operationMap: Record<OperationType, string> = {
-        'read': 'read',
-        'write': 'write',
-        'edit': 'edit',
-        'bash': 'bash',
-        'llmcall': 'llmcall',
-        'collect': 'collect',
-      };
+      // 根据操作类型确定 kind 字段
+      let kind: 'exec' | 'observe' = 'exec';
+      if (operation === 'read' || operation === 'bash') {
+        kind = 'observe';
+      }
       
-      const traceEntry: Omit<TraceEntry, 'seq'> = {
+      trace.append({
         ts: Date.now(),
-        kind: 'exec',  // 原子操作统一为 exec
-        data: { operation: operationMap[operation], input, output: truncatedOutput },
-        operation: operationMap[operation],  // 补齐 operation 字段
+        seq,  // 使用与 terminalLog 相同的 seq，确保一致性
+        kind,
+        data: { operation },  // 记录操作类型
+        operation,  // 补齐 operation 字段
         input,
-        output: truncatedOutput,
+        output: truncatedOutput,  // 补齐 output 字段
         durationMs: options?.durationMs,
-        terminal_seq: seq,  // 关联 TerminalLog 序号
-      };
-      trace.append(traceEntry);
+      });
     }
   };
 
