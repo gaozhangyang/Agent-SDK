@@ -1,0 +1,15 @@
+{
+  "name": "NLP and Large Language Models",
+  "description": "大型语言模型、指令微调、对齐、推理优化",
+  "keywords": [
+    "LLM",
+    "transformer",
+    "RLHF",
+    "RAG"
+  ],
+  "arxiv_categories": [
+    "cs.CL",
+    "cs.AI"
+  ],
+  "updated_at": "2026-03-02"
+}

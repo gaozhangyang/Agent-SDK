@@ -1,0 +1,35 @@
+{
+  "topics": [
+    {
+      "name": "Computer_Vision",
+      "keywords": ["video generation", "diffusion", "video synthesis", "long video", "image generation", "image editing"],
+      "arxiv_categories": ["cs.CV"],
+      "min_relevance_score": 0.6
+    },
+    {
+      "name": "NLP_and_LLM",
+      "keywords": ["language model", "LLM", "transformer", "attention", "large language model", "text generation"],
+      "arxiv_categories": ["cs.CL", "cs.LG"],
+      "min_relevance_score": 0.6
+    },
+    {
+      "name": "Reinforcement_Learning",
+      "keywords": ["reinforcement learning", "RL", "policy", "reward", "agent"],
+      "arxiv_categories": ["cs.LG", "cs.AI"],
+      "min_relevance_score": 0.5
+    }
+  ],
+  "global_settings": {
+    "fetch_max_papers": 10,
+    "screening_threshold": 0.6,
+    "schedule_utc_hour": 8,
+    "debug": false,
+    "llm": {
+      "baseUrl": "http://35.220.164.252:3888/v1",
+      "model": "MiniMax-M2.5",
+      "apiKey": ""
+    },
+    "sdk_url": "http://127.0.0.1:3890",
+    "pdf_download_dir": "data/pdfs"
+  }
+}

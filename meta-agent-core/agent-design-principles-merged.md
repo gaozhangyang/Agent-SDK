@@ -262,7 +262,7 @@ coverage 低，reliability 低  → 直接 Escalate
 | file | 读取指定文件 |
 | bash | 执行 shell 命令并获取输出 |
 | trace_tag | 按标签过滤 Trace 历史 |
-| skills | 从 `skills/` 目录检索技能文档（先尝试 `{query}.md`，再 grep 关键词） |
+| skills | 从 `skills/` 目录检索技能文档（解析到 `skills/{query}/SKILL.md`，每个 skill 可包含独立脚本和资源） |
 
 `limits` 中包含 token 预算约束：优先保留最近交互和 State，对已归档子目标的旧 Trace 做摘要压缩。
 
@@ -585,6 +585,123 @@ Terminal Log（独立信息流，记录所有原子操作）
 operation / input / output / command / exitCode / durationMs / truncated
         ↕ 通过 terminal_seq 关联 Trace.exec 条目
 ```
+
+---
+
+## 案例：Survey Agent 的 Workflow 驱动设计
+
+以下以 Survey Agent 为例，说明如何把业务 workflow 放入 AGENT.md，而让运行时容器只做薄封装。
+
+### 背景
+
+Survey Agent 是一种自动化学术文献检索与知识管理系统，需要执行以下三个阶段的流水线：
+1. **Fetcher**：从 arXiv 抓取论文
+2. **Screener**：基于用户配置和知识库筛选论文
+3. **Analyst**：分析论文并写入知识库
+
+### 传统实现方式
+
+传统的做法是将 workflow 硬编码在 Python 源码中（如 pipeline.py）：
+
+```python
+# 传统方式：Python 代码控制 workflow
+def run_pipeline():
+    # Stage 1: Fetcher
+    fetch_papers()
+    # Stage 2: Screener
+    screen_papers()
+    # Stage 3: Analyst
+    analyze_papers()
+```
+
+**问题**：业务逻辑修改需要改 Python 代码，不够灵活。
+
+### 推荐实现方式：AGENT.md + Skills 驱动
+
+将 workflow 定义在 `.agent/AGENT.md` 中，Python 只做薄封装：
+
+#### 1. AGENT.md 定义 Workflow
+
+在 AGENT.md 中添加 Survey Workflow 章节，描述：
+- 三个阶段的总览
+- 每个阶段的配置来源（引用 SKILL.md）
+- 输入输出约定
+- 目录与文件命名规范
+
+```markdown
+## Survey Workflow
+
+### Fetcher 阶段
+- 参考 skills/arxiv_api/SKILL.md
+- 输出: data/raw_papers_{YYYY-MM-DD}.json
+
+### Screener 阶段
+- 参考 skills/screening/SKILL.md
+- 输出: data/selected_papers_{YYYY-MM-DD}.json
+
+### Analyst 阶段
+- 参考 skills/writing/SKILL.md
+- 输出: knowledge_base/{topic}/paper_{arxiv_id}.md
+```
+
+#### 2. Skills 定义可组合能力单元
+
+每个 Skill 独立定义：
+- 技能用途
+- 输入/输出格式
+- 命令行及 Python 调用方式
+- 与其他技能的衔接说明
+
+```
+skills/
+├── arxiv_api/
+│   ├── SKILL.md        # 技能说明
+│   └── fetch_arxiv.py  # 实现脚本
+├── screening/
+│   ├── SKILL.md
+│   └── screen_papers.py
+├── writing/
+│   └── SKILL.md
+└── pdf_extract/
+    ├── SKILL.md
+    └── extract_text.py
+```
+
+#### 3. Python 薄封装
+
+Python 代码（api_server.py）只提供：
+- HTTP API 接口
+- 调用 SDK 的胶水逻辑
+- 目录结构初始化
+
+```python
+# 薄封装：只构造 goal 和 sources，让 Agent 自行推理
+def run_pipeline_thread():
+    goal = "执行一次完整的 Survey Workflow..."
+    
+    sources = [
+        {"type": "file", "query": ".agent/AGENT.md"},
+        {"type": "skills", "query": "arxiv_api"},
+        {"type": "skills", "query": "screening"},
+        {"type": "skills", "query": "writing"},
+    ]
+    
+    sdk.run(goal=goal, workDir=..., collectConfig={"sources": sources})
+```
+
+### 设计原则
+
+1. **Workflow 驱动**：具体的工作流程通过 AGENT.md + skills 文档定义，而不是硬编码在 Python 代码中
+2. **Skills 作为可组合能力单元**：每个 Skill 独立定义职责，通过 CollectConfig 组合使用
+3. **Python 薄封装**：Python 代码只提供运行时容器、API 接口和少量胶水逻辑
+4. **修改优先序**：业务逻辑修改应优先改 AGENT.md 和 skills，而不是改 Python 源码
+
+### 优势
+
+- **灵活性**：修改 workflow 不需要改 Python 代码
+- **可读性**：AGENT.md 清晰描述了整体架构
+- **可测试性**：每个 Skill 可以独立测试
+- **可扩展性**：新增 Skill 只需要在 AGENT.md 中引用
 
 ---
 

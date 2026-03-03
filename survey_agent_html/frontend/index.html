@@ -1,0 +1,2061 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Research Nexus — 学术知识图谱</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Mono:wght@300;400;500&family=Noto+Sans+SC:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --ink: #0d0d0d;
+    --paper: #f5f0e8;
+    --cream: #ede8dc;
+    --warm-mid: #c8bfa8;
+    --accent-red: #c0392b;
+    --accent-amber: #d4820a;
+    --accent-teal: #1a7a6e;
+    --accent-indigo: #2d3a8c;
+    --accent-sage: #4a7c59;
+    --text-secondary: #5a5248;
+    --border: #d4cec4;
+    --shadow: rgba(13,13,13,0.08);
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  html { scroll-behavior: smooth; }
+
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: 'Noto Sans SC', serif;
+    font-weight: 300;
+    line-height: 1.7;
+    overflow-x: hidden;
+  }
+
+  /* NOISE TEXTURE OVERLAY */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.03'/%3E%3C/svg%3E");
+    pointer-events: none;
+    z-index: 1000;
+    opacity: 0.6;
+  }
+
+  /* NAV */
+  nav {
+    position: fixed;
+    top: 0; left: 0; right: 0;
+    z-index: 100;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 1.2rem 3rem;
+    background: rgba(245,240,232,0.85);
+    backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--border);
+  }
+
+  .nav-logo {
+    font-family: 'DM Serif Display', serif;
+    font-size: 1.25rem;
+    letter-spacing: -0.02em;
+    color: var(--ink);
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .nav-logo span {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.65rem;
+    font-weight: 300;
+    color: var(--accent-red);
+    background: rgba(192,57,43,0.08);
+    padding: 0.1rem 0.4rem;
+    border-radius: 2px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .nav-links {
+    display: flex;
+    gap: 2.5rem;
+    list-style: none;
+  }
+
+  .nav-links a {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.72rem;
+    font-weight: 300;
+    color: var(--text-secondary);
+    text-decoration: none;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    transition: color 0.2s;
+  }
+
+  .nav-links a:hover { color: var(--ink); }
+
+  .nav-date {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.68rem;
+    color: var(--warm-mid);
+    letter-spacing: 0.05em;
+  }
+
+  /* RUN BUTTON */
+  .run-btn {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.65rem;
+    padding: 0.4rem 0.8rem;
+    background: var(--accent-teal);
+    color: white;
+    border: none;
+    border-radius: 3px;
+    cursor: pointer;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    transition: background 0.2s, transform 0.1s;
+  }
+  
+  .run-btn:hover { background: #156b5f; }
+  .run-btn:active { transform: scale(0.98); }
+  .run-btn:disabled { background: var(--warm-mid); cursor: not-allowed; }
+
+  /* DEBUG TOGGLE */
+  .debug-toggle {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    cursor: pointer;
+    font-family: 'DM Mono', monospace;
+    font-size: 0.62rem;
+    color: var(--text-secondary);
+    letter-spacing: 0.05em;
+  }
+  
+  .debug-toggle input {
+    width: 14px;
+    height: 14px;
+    accent-color: var(--accent-amber);
+  }
+  
+  .debug-label {
+    text-transform: uppercase;
+  }
+
+  /* DEBUG PANEL */
+  .debug-panel {
+    position: fixed;
+    bottom: 2rem;
+    left: 2rem;
+    background: var(--ink);
+    border-radius: 4px;
+    padding: 1rem;
+    min-width: 400px;
+    max-height: 300px;
+    overflow-y: auto;
+    box-shadow: 0 12px 40px rgba(0,0,0,0.3);
+    z-index: 200;
+    display: none;
+    font-family: 'DM Mono', monospace;
+    font-size: 0.6rem;
+  }
+  
+  .debug-panel.visible { display: block; }
+  
+  .debug-panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 0.8rem;
+    padding-bottom: 0.5rem;
+    border-bottom: 1px solid rgba(255,255,255,0.2);
+  }
+  
+  .debug-panel-title {
+    color: var(--accent-amber);
+    font-size: 0.65rem;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+  }
+  
+  .debug-panel-close {
+    color: rgba(255,255,255,0.4);
+    cursor: pointer;
+    font-size: 0.7rem;
+  }
+  
+  .debug-panel-close:hover { color: white; }
+  
+  .debug-item {
+    padding: 0.4rem 0;
+    border-bottom: 1px solid rgba(255,255,255,0.08);
+    color: rgba(255,255,255,0.7);
+    word-break: break-all;
+  }
+  
+  .debug-item:last-child { border-bottom: none; }
+  
+  .debug-event {
+    color: var(--accent-teal);
+    font-weight: 500;
+  }
+  
+  .debug-time {
+    color: rgba(255,255,255,0.3);
+    font-size: 0.55rem;
+    margin-left: 0.5rem;
+  }
+  
+  .debug-success { color: var(--accent-teal); }
+  .debug-error { color: var(--accent-red); }
+  .debug-info { color: var(--accent-amber); }
+
+  /* HERO */
+  .hero {
+    min-height: 100vh;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    padding-top: 70px;
+    overflow: hidden;
+  }
+
+  .hero-left {
+    padding: 8rem 3rem 4rem 3rem;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    position: relative;
+  }
+
+  .hero-eyebrow {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.68rem;
+    color: var(--accent-red);
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    margin-bottom: 1.5rem;
+    opacity: 0;
+    animation: fadeUp 0.6s 0.2s forwards;
+  }
+
+  .hero-title {
+    font-family: 'DM Serif Display', serif;
+    font-size: clamp(3rem, 5vw, 5.5rem);
+    line-height: 1.02;
+    letter-spacing: -0.03em;
+    color: var(--ink);
+    margin-bottom: 2rem;
+    opacity: 0;
+    animation: fadeUp 0.7s 0.35s forwards;
+  }
+
+  .hero-title em {
+    font-style: italic;
+    color: var(--accent-teal);
+  }
+
+  .hero-subtitle {
+    font-size: 1rem;
+    color: var(--text-secondary);
+    max-width: 38ch;
+    line-height: 1.8;
+    margin-bottom: 3rem;
+    opacity: 0;
+    animation: fadeUp 0.7s 0.5s forwards;
+  }
+
+  .hero-stats {
+    display: flex;
+    gap: 2.5rem;
+    opacity: 0;
+    animation: fadeUp 0.7s 0.65s forwards;
+  }
+
+  .stat {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .stat-number {
+    font-family: 'DM Serif Display', serif;
+    font-size: 2.2rem;
+    color: var(--ink);
+    line-height: 1;
+  }
+
+  .stat-label {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.65rem;
+    color: var(--warm-mid);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin-top: 0.3rem;
+  }
+
+  .hero-right {
+    background: var(--ink);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    overflow: hidden;
+  }
+
+  /* Activity chart on right */
+  .activity-viz {
+    width: 85%;
+    height: 70%;
+    position: relative;
+  }
+
+  .viz-title {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.65rem;
+    color: rgba(255,255,255,0.35);
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    margin-bottom: 1.5rem;
+  }
+
+  .heatmap-grid {
+    display: grid;
+    grid-template-columns: repeat(26, 1fr);
+    gap: 3px;
+  }
+
+  .heatmap-cell {
+    aspect-ratio: 1;
+    border-radius: 2px;
+    background: rgba(255,255,255,0.05);
+    transition: background 0.3s;
+    cursor: pointer;
+    position: relative;
+  }
+
+  .heatmap-cell:hover::after {
+    content: attr(data-val) ' papers';
+    position: absolute;
+    bottom: calc(100% + 6px);
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(255,255,255,0.9);
+    color: var(--ink);
+    font-family: 'DM Mono', monospace;
+    font-size: 0.6rem;
+    padding: 0.2rem 0.5rem;
+    border-radius: 3px;
+    white-space: nowrap;
+    pointer-events: none;
+    z-index: 10;
+  }
+
+  .heatmap-cell[data-level="1"] { background: rgba(26,122,110,0.2); }
+  .heatmap-cell[data-level="2"] { background: rgba(26,122,110,0.45); }
+  .heatmap-cell[data-level="3"] { background: rgba(26,122,110,0.7); }
+  .heatmap-cell[data-level="4"] { background: rgba(26,122,110,0.9); }
+
+  .heatmap-months {
+    display: flex;
+    justify-content: space-between;
+    margin-top: 0.6rem;
+    font-family: 'DM Mono', monospace;
+    font-size: 0.58rem;
+    color: rgba(255,255,255,0.25);
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+  }
+
+  .recent-activity {
+    margin-top: 2.5rem;
+  }
+
+  .activity-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.8rem;
+    padding: 0.7rem 0;
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+    opacity: 0;
+    animation: fadeIn 0.4s forwards;
+  }
+
+  .activity-dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    margin-top: 0.45rem;
+    flex-shrink: 0;
+  }
+
+  .activity-text {
+    font-size: 0.78rem;
+    color: rgba(255,255,255,0.55);
+    line-height: 1.4;
+  }
+
+  .activity-text strong {
+    color: rgba(255,255,255,0.85);
+    font-weight: 400;
+  }
+
+  .activity-time {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.6rem;
+    color: rgba(255,255,255,0.2);
+    margin-top: 0.2rem;
+  }
+
+  /* SECTION LAYOUT */
+  section {
+    padding: 5rem 3rem;
+    max-width: 1440px;
+    margin: 0 auto;
+  }
+
+  .section-header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    margin-bottom: 3rem;
+    padding-bottom: 1rem;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .section-label {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.65rem;
+    color: var(--warm-mid);
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+  }
+
+  .section-title {
+    font-family: 'DM Serif Display', serif;
+    font-size: 2.2rem;
+    letter-spacing: -0.02em;
+    color: var(--ink);
+    margin-top: 0.4rem;
+  }
+
+  .section-count {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.72rem;
+    color: var(--warm-mid);
+    letter-spacing: 0.05em;
+  }
+
+  /* KNOWLEDGE PANELS */
+  .topics-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1.5rem;
+  }
+
+  .topic-card {
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    overflow: hidden;
+    cursor: pointer;
+    transition: transform 0.25s, box-shadow 0.25s;
+    background: rgba(255,255,255,0.4);
+    position: relative;
+  }
+
+  .topic-card:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 12px 40px var(--shadow);
+  }
+
+  .topic-card-accent {
+    height: 3px;
+    width: 100%;
+  }
+
+  .topic-card-body {
+    padding: 1.8rem;
+  }
+
+  .topic-card-icon {
+    font-size: 1.5rem;
+    margin-bottom: 1rem;
+  }
+
+  .topic-card-name {
+    font-family: 'DM Serif Display', serif;
+    font-size: 1.3rem;
+    letter-spacing: -0.02em;
+    color: var(--ink);
+    margin-bottom: 0.5rem;
+    line-height: 1.2;
+  }
+
+  .topic-card-desc {
+    font-size: 0.82rem;
+    color: var(--text-secondary);
+    line-height: 1.7;
+    margin-bottom: 1.5rem;
+  }
+
+  .topic-card-meta {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .topic-paper-count {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.65rem;
+    color: var(--warm-mid);
+    letter-spacing: 0.05em;
+  }
+
+  .topic-keywords {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    margin-bottom: 1.2rem;
+  }
+
+  .kw-tag {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.6rem;
+    padding: 0.2rem 0.5rem;
+    border-radius: 2px;
+    letter-spacing: 0.04em;
+    border: 1px solid;
+  }
+
+  .topic-card-footer {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-family: 'DM Mono', monospace;
+    font-size: 0.65rem;
+    letter-spacing: 0.05em;
+    opacity: 0;
+    transition: opacity 0.2s;
+  }
+
+  .topic-card:hover .topic-card-footer { opacity: 1; }
+
+  /* TRENDS */
+  .trends-layout {
+    display: grid;
+    grid-template-columns: 2fr 1fr;
+    gap: 2rem;
+  }
+
+  .trend-chart-card {
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 2rem;
+    background: rgba(255,255,255,0.4);
+  }
+
+  .chart-title {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.65rem;
+    color: var(--warm-mid);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    margin-bottom: 0.5rem;
+  }
+
+  .chart-subtitle {
+    font-family: 'DM Serif Display', serif;
+    font-size: 1.3rem;
+    color: var(--ink);
+    margin-bottom: 1.5rem;
+    letter-spacing: -0.02em;
+  }
+
+  .line-chart {
+    width: 100%;
+    height: 200px;
+    position: relative;
+  }
+
+  .line-chart svg {
+    width: 100%;
+    height: 100%;
+    overflow: visible;
+  }
+
+  .chart-x-labels {
+    display: flex;
+    justify-content: space-between;
+    margin-top: 0.5rem;
+    font-family: 'DM Mono', monospace;
+    font-size: 0.6rem;
+    color: var(--warm-mid);
+    letter-spacing: 0.05em;
+  }
+
+  .chart-legend {
+    display: flex;
+    gap: 1.5rem;
+    margin-top: 1.2rem;
+    flex-wrap: wrap;
+  }
+
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-family: 'DM Mono', monospace;
+    font-size: 0.62rem;
+    color: var(--text-secondary);
+    letter-spacing: 0.04em;
+  }
+
+  .legend-dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  .rising-topics {
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 2rem;
+    background: rgba(255,255,255,0.4);
+  }
+
+  .rising-item {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    padding: 0.9rem 0;
+    border-bottom: 1px solid var(--border);
+    cursor: pointer;
+    transition: background 0.15s;
+    margin: 0 -0.5rem;
+    padding-left: 0.5rem;
+    padding-right: 0.5rem;
+    border-radius: 3px;
+  }
+
+  .rising-item:last-child { border-bottom: none; }
+  .rising-item:hover { background: rgba(0,0,0,0.025); }
+
+  .rising-rank {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.65rem;
+    color: var(--warm-mid);
+    width: 1.2rem;
+    text-align: right;
+    flex-shrink: 0;
+  }
+
+  .rising-info { flex: 1; }
+
+  .rising-keyword {
+    font-size: 0.88rem;
+    color: var(--ink);
+    font-weight: 400;
+    margin-bottom: 0.15rem;
+  }
+
+  .rising-bar-wrap {
+    height: 3px;
+    background: var(--cream);
+    border-radius: 2px;
+    margin-top: 0.4rem;
+  }
+
+  .rising-bar {
+    height: 100%;
+    border-radius: 2px;
+    transition: width 1s cubic-bezier(0.25, 1, 0.5, 1);
+  }
+
+  .rising-pct {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.65rem;
+    font-weight: 500;
+    flex-shrink: 0;
+  }
+
+  /* PAPERS FEED */
+  .papers-feed {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+  }
+
+  .paper-row {
+    display: grid;
+    grid-template-columns: 80px 1fr auto;
+    gap: 1.5rem;
+    align-items: start;
+    padding: 1.8rem 0;
+    border-bottom: 1px solid var(--border);
+    cursor: pointer;
+    transition: background 0.15s;
+    margin: 0 -1rem;
+    padding-left: 1rem;
+    padding-right: 1rem;
+    border-radius: 3px;
+  }
+
+  .paper-row:hover {
+    background: rgba(255,255,255,0.7);
+  }
+
+  .paper-date {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.65rem;
+    color: var(--warm-mid);
+    letter-spacing: 0.05em;
+    line-height: 1.4;
+    padding-top: 0.15rem;
+  }
+
+  .paper-title {
+    font-family: 'DM Serif Display', serif;
+    font-size: 1.1rem;
+    letter-spacing: -0.01em;
+    color: var(--ink);
+    margin-bottom: 0.4rem;
+    line-height: 1.3;
+  }
+
+  .paper-abstract {
+    font-size: 0.82rem;
+    color: var(--text-secondary);
+    line-height: 1.7;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    margin-bottom: 0.8rem;
+  }
+
+  .paper-tags {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+  }
+
+  .paper-tag {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.6rem;
+    padding: 0.15rem 0.5rem;
+    border-radius: 2px;
+    letter-spacing: 0.04em;
+    border: 1px solid var(--border);
+    color: var(--text-secondary);
+  }
+
+  .paper-score-wrap {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 0.5rem;
+    padding-top: 0.15rem;
+  }
+
+  .paper-score {
+    font-family: 'DM Serif Display', serif;
+    font-size: 1.6rem;
+    color: var(--ink);
+    line-height: 1;
+  }
+
+  .paper-score-label {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.55rem;
+    color: var(--warm-mid);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .paper-topic-badge {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.58rem;
+    padding: 0.2rem 0.5rem;
+    border-radius: 2px;
+    letter-spacing: 0.04em;
+    border: 1px solid;
+  }
+
+  /* FOOTER */
+  footer {
+    border-top: 1px solid var(--border);
+    padding: 2rem 3rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    max-width: 1440px;
+    margin: 0 auto;
+  }
+
+  .footer-logo {
+    font-family: 'DM Serif Display', serif;
+    font-size: 1rem;
+    color: var(--text-secondary);
+    letter-spacing: -0.02em;
+  }
+
+  .footer-info {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.62rem;
+    color: var(--warm-mid);
+    letter-spacing: 0.05em;
+    text-align: right;
+    line-height: 1.7;
+  }
+
+  /* RUN STATUS PANEL */
+  .run-panel {
+    position: fixed;
+    bottom: 2rem;
+    right: 2rem;
+    background: var(--paper);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 1.5rem;
+    min-width: 320px;
+    box-shadow: 0 12px 40px var(--shadow);
+    z-index: 200;
+    display: none;
+  }
+
+  .run-panel.visible { display: block; }
+
+  .run-panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 1rem;
+   0.8rem;
+    border-bottom: 1px solid var(-- padding-bottom: border);
+  }
+
+  .run-panel-title {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.65rem;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+  }
+
+  .run-panel-close {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.6rem;
+    cursor: pointer;
+    color: var(--warm-mid);
+  }
+
+  .run-panel-close:hover { color: var(--ink); }
+
+  .stage-item {
+    display: flex;
+    align-items: center;
+    gap: 0.8rem;
+    padding: 0.5rem 0;
+    font-family: 'DM Mono', monospace;
+    font-size: 0.65rem;
+  }
+
+  .stage-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--cream);
+  }
+
+  .stage-dot.active { background: var(--accent-amber); }
+  .stage-dot.done { background: var(--accent-teal); }
+  .stage-dot.failed { background: var(--accent-red); }
+
+  .stage-name { flex: 1; color: var(--text-secondary); }
+  .stage-status { color: var(--warm-mid); font-size: 0.55rem; }
+
+  .progress-bar {
+    margin-top: 1rem;
+    height: 4px;
+    background: var(--cream);
+    border-radius: 2px;
+    overflow: hidden .progress-fill {
+;
+  }
+
+     height: 100%;
+    background: var(--accent-teal);
+    transition: width 0.3s;
+  }
+
+  .progress-text {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.55rem;
+    color: var(--warm-mid);
+    margin-top: 0.5rem;
+    text-align: right;
+  }
+
+  /* MODAL */
+  .modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(13,13,13,0.7);
+    backdrop-filter: blur(4px);
+    z-index: 500;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.25s;
+  }
+
+  .modal-overlay.open {
+    opacity: 1;
+    pointer-events: all;
+  }
+
+  .modal {
+    background: var(--paper);
+    border-radius: 4px;
+    width: 90%;
+    max-width: 700px;
+    max-height: 85vh;
+    overflow-y: auto;
+    padding: 2.5rem;
+    transform: translateY(20px);
+    transition: transform 0.3s;
+    position: relative;
+  }
+
+  .modal-overlay.open .modal {
+    transform: translateY(0);
+  }
+
+  .modal-close {
+    position: absolute;
+    top: 1.2rem; right: 1.5rem;
+    font-family: 'DM Mono', monospace;
+    font-size: 0.7rem;
+    color: var(--warm-mid);
+    cursor: pointer;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    border: 1px solid var(--border);
+    padding: 0.3rem 0.7rem;
+    border-radius: 2px;
+    background: none;
+    transition: color 0.2s;
+  }
+
+  .modal-close:hover { color: var(--ink); }
+
+  .modal-eyebrow {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.62rem;
+    color: var(--accent-teal);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    margin-bottom: 0.8rem;
+  }
+
+  .modal-title {
+    font-family: 'DM Serif Display', serif;
+    font-size: 1.6rem;
+    letter-spacing: -0.02em;
+    color: var(--ink);
+    margin-bottom: 1.5rem;
+    line-height: 1.25;
+  }
+
+  .modal-section-title {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.62rem;
+    color: var(--warm-mid);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    margin: 1.5rem 0 0.5rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid var(--border);
+  }
+
+  .modal-text {
+    font-size: 0.88rem;
+    color: var(--text-secondary);
+    line-height: 1.85;
+  }
+
+  .modal-meta {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.8rem;
+    margin-bottom: 1.5rem;
+  }
+
+  .meta-item {
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 0.7rem 1rem;
+  }
+
+  .meta-key {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.6rem;
+    color: var(--warm-mid);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    margin-bottom: 0.2rem;
+  }
+
+  .meta-val {
+    font-size: 0.85rem;
+    color: var(--ink);
+    font-weight: 400;
+  }
+
+  /* FEEDBACK BUTTONS */
+  .feedback-buttons {
+    display: flex;
+    gap: 0.5rem;
+    margin-top: 1.5rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--border);
+  }
+
+  .feedback-btn {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.6rem;
+    padding: 0.4rem 0.8rem;
+    border: 1px solid var(--border);
+    background: none;
+    border-radius: 2px;
+    cursor: pointer;
+    transition: background 0.2s;
+  }
+
+  .feedback-btn:hover { background: var(--cream); }
+  .feedback-btn.active { background: var(--accent-teal); color: white; border-color: var(--accent-teal); }
+
+  /* TABS */
+  .tab-bar {
+    display: flex;
+    gap: 0;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 2.5rem;
+  }
+
+  .tab {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.68rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    padding: 0.8rem 1.5rem;
+    cursor: pointer;
+    color: var(--warm-mid);
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
+    transition: color 0.2s, border-color 0.2s;
+  }
+
+  .tab.active {
+    color: var(--ink);
+    border-bottom-color: var(--ink);
+  }
+
+  .tab-content { display: none; }
+  .tab-content.active { display: block; }
+
+  /* LOADING STATE */
+  .loading {
+    text-align: center;
+    padding: 3rem;
+    color: var(--warm-mid);
+    font-family: 'DM Mono', monospace;
+    font-size: 0.72rem;
+  }
+
+  /* ANIMATIONS */
+  @keyframes fadeUp {
+    from { opacity: 0; transform: translateY(16px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  @keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+
+  @keyframes drawLine {
+    from { stroke-dashoffset: 1000; }
+    to { stroke-dashoffset: 0; }
+  }
+
+  .animate-line {
+    stroke-dasharray: 1000;
+    stroke-dashoffset: 1000;
+    animation: drawLine 1.5s ease forwards;
+  }
+
+  /* DIVIDER */
+  .section-divider {
+    border: none;
+    border-top: 1px solid var(--border);
+    margin: 0 3rem;
+  }
+
+</style>
+</head>
+<body>
+
+<!-- NAV -->
+<nav>
+  <div class="nav-logo">
+    Research Nexus
+    <span>Beta</span>
+  </div>
+  <ul class="nav-links">
+    <li><a href="#topics">知识板块</a></li>
+    <li><a href="#trends">研究趋势</a></li>
+    <li><a href="#papers">最新论文</a></li>
+  </ul>
+  <div style="display:flex;align-items:center;gap:1rem">
+    <label class="debug-toggle">
+      <input type="checkbox" id="debugToggle" onchange="toggleDebug()">
+      <span class="debug-label">调试</span>
+    </label>
+    <button class="run-btn" id="runBtn" onclick="triggerRun()">运行 Agent</button>
+    <div class="nav-date" id="navDate"></div>
+  </div>
+</nav>
+
+<!-- HERO -->
+<div class="hero">
+  <div class="hero-left">
+    <div class="hero-eyebrow">AI-Powered Literature Intelligence</div>
+    <h1 class="hero-title">每日追踪<br><em>前沿研究</em><br>动态</h1>
+    <p class="hero-subtitle">自动从 arXiv 获取、筛选、精读最新论文，将知识沉淀到结构化的研究图谱之中。</p>
+    <!-- 运行过滤条件 -->
+    <div style="margin-bottom:1.5rem;padding:0.9rem 1rem;border:1px solid var(--border);border-radius:4px;background:rgba(255,255,255,0.6);display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0.75rem;grid-auto-rows:minmax(0,auto);">
+      <div style="display:flex;flex-direction:column;gap:0.25rem;">
+        <label style="font-family:'DM Mono',monospace;font-size:0.62rem;letter-spacing:0.08em;text-transform:uppercase;color:var(--warm-mid);">起始日期</label>
+        <input id="filterStartDate" type="date" style="font-size:0.78rem;padding:0.35rem 0.5rem;border-radius:3px;border:1px solid var(--border);background:white;">
+      </div>
+      <div style="display:flex;flex-direction:column;gap:0.25rem;">
+        <label style="font-family:'DM Mono',monospace;font-size:0.62rem;letter-spacing:0.08em;text-transform:uppercase;color:var(--warm-mid);">结束日期</label>
+        <input id="filterEndDate" type="date" style="font-size:0.78rem;padding:0.35rem 0.5rem;border-radius:3px;border:1px solid var(--border);background:white;">
+      </div>
+      <div style="display:flex;flex-direction:column;gap:0.25rem;">
+        <label style="font-family:'DM Mono',monospace;font-size:0.62rem;letter-spacing:0.08em;text-transform:uppercase;color:var(--warm-mid);">最大论文数</label>
+        <input id="filterMaxPapers" type="number" min="1" max="500" value="100" style="font-size:0.78rem;padding:0.35rem 0.5rem;border-radius:3px;border:1px solid var(--border);background:white;">
+      </div>
+      <div style="grid-column:1 / span 2;display:flex;flex-direction:column;gap:0.25rem;">
+        <label style="font-family:'DM Mono',monospace;font-size:0.62rem;letter-spacing:0.08em;text-transform:uppercase;color:var(--warm-mid);">研究内容描述（可选）</label>
+        <input id="filterResearchQuery" type="text" placeholder="例如：多模态 Agent 协作、长上下文推理等" style="font-size:0.78rem;padding:0.35rem 0.5rem;border-radius:3px;border:1px solid var(--border);background:white;">
+      </div>
+    </div>
+    <div class="hero-stats">
+      <div class="stat">
+        <span class="stat-number" id="statPapers">0</span>
+        <span class="stat-label">累计论文</span>
+      </div>
+      <div class="stat">
+        <span class="stat-number" id="statTopics">0</span>
+        <span class="stat-label">知识板块</span>
+      </div>
+      <div class="stat">
+        <span class="stat-number" id="statStreak">0</span>
+        <span class="stat-label">连续天数</span>
+      </div>
+    </div>
+  </div>
+  <div class="hero-right">
+    <div class="activity-viz">
+      <div class="viz-title">每日摄入活动 — 过去 6 个月</div>
+      <div class="heatmap-grid" id="heatmapGrid"></div>
+      <div class="heatmap-months">
+        <span>Sep</span><span>Oct</span><span>Nov</span><span>Dec</span><span>Jan</span><span>Feb</span>
+      </div>
+      <div class="recent-activity" id="recentActivity"></div>
+    </div>
+  </div>
+</div>
+
+<hr class="section-divider">
+
+<!-- KNOWLEDGE TOPICS -->
+<section id="topics">
+  <div class="section-header">
+    <div>
+      <div class="section-label">Knowledge Panels</div>
+      <h2 class="section-title">知识板块</h2>
+    </div>
+    <div class="section-count" id="topicCount"></div>
+  </div>
+  <div class="topics-grid" id="topicsGrid">
+    <div class="loading">加载中...</div>
+  </div>
+</section>
+
+<hr class="section-divider">
+
+<!-- TRENDS -->
+<section id="trends">
+  <div class="section-header">
+    <div>
+      <div class="section-label">Research Intelligence</div>
+      <h2 class="section-title">研究趋势</h2>
+    </div>
+  </div>
+  <div class="trends-layout">
+    <div class="trend-chart-card">
+      <div class="chart-title">Topic Activity</div>
+      <div class="chart-subtitle">各板块月度论文摄入量</div>
+      <div class="line-chart">
+        <svg id="lineChartSvg" viewBox="0 0 600 200" preserveAspectRatio="none"></svg>
+      </div>
+      <div class="chart-x-labels">
+        <span>Sep</span><span>Oct</span><span>Nov</span><span>Dec</span><span>Jan</span><span>Feb</span>
+      </div>
+      <div class="chart-legend" id="chartLegend"></div>
+    </div>
+    <div class="rising-topics">
+      <div class="chart-title">Rising Keywords</div>
+      <div class="chart-subtitle">热度上升关键词</div>
+      <div id="risingList">
+        <div class="loading">加载中...</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<hr class="section-divider">
+
+<!-- PAPERS FEED -->
+<section id="papers">
+  <div class="section-header">
+    <div>
+      <div class="section-label">Recent Additions</div>
+      <h2 class="section-title">最新论文</h2>
+    </div>
+  </div>
+  <div class="tab-bar" id="tabBar">
+    <div class="tab active" data-topic="all">全部</div>
+  </div>
+  <div class="papers-feed" id="papersFeed">
+    <div class="loading">加载中...</div>
+  </div>
+</section>
+
+<!-- FOOTER -->
+<footer>
+  <div class="footer-logo">Research Nexus</div>
+  <div class="footer-info">
+    由 Survey Agent 自动更新<br>
+    上次同步: <span id="lastSync"></span>
+  </div>
+</footer>
+
+<!-- RUN STATUS PANEL -->
+<div class="run-panel" id="runPanel">
+  <div class="run-panel-header">
+    <div class="run-panel-title" id="runPanelTitle">运行中</div>
+    <div class="run-panel-close" onclick="closeRunPanel()">✕ 关闭</div>
+  </div>
+  <div id="runPanelContent">
+    <div class="stage-item">
+      <div class="stage-dot" id="stageFetcher"></div>
+      <div class="stage-name">Fetcher</div>
+      <div class="stage-status" id="statusFetcher">等待</div>
+    </div>
+    <div class="stage-item">
+      <div class="stage-dot" id="stageScreener"></div>
+      <div class="stage-name">Screener</div>
+      <div class="stage-status" id="statusScreener">等待</div>
+    </div>
+    <div class="stage-item">
+      <div class="stage-dot" id="stageAnalyst"></div>
+      <div class="stage-name">Analyst</div>
+      <div class="stage-status" id="statusAnalyst">等待</div>
+    </div>
+  </div>
+  <div class="progress-bar">
+    <div class="progress-fill" id="progressFill" style="width:0%"></div>
+  </div>
+  <div class="progress-text" id="progressText">0%</div>
+</div>
+
+<!-- DEBUG PANEL -->
+<div class="debug-panel" id="debugPanel">
+  <div class="debug-panel-header">
+    <div class="debug-panel-title">🔧 调试面板</div>
+    <div class="debug-panel-close" onclick="closeDebugPanel()">✕ 关闭</div>
+  </div>
+  <div id="debugContent">
+    <div class="debug-item" style="color:rgba(255,255,255,0.4)">等待调试事件...</div>
+  </div>
+</div>
+
+<!-- MODAL -->
+<div class="modal-overlay" id="modalOverlay">
+  <div class="modal" id="modalContent">
+    <button class="modal-close" onclick="closeModal()">关闭 ✕</button>
+    <div id="modalBody"></div>
+  </div>
+</div>
+
+<script>
+// ==================== STATE ====================
+let topics = [];
+let papers = [];
+let currentFilter = 'all';
+let runEventSource = null;
+let debugMode = false;
+let debugEvents = [];
+
+// ==================== INIT ====================
+document.addEventListener('DOMContentLoaded', async () => {
+  setDate();
+  animateStats();
+  buildHeatmap();
+  
+  // 加载配置，获取debug状态
+  await loadConfig();
+  
+  // 加载数据
+  await loadTopics();
+  await loadPapers();
+  await loadTrends();
+  buildRecentActivity();
+});
+
+async function loadConfig() {
+  try {
+    const res = await fetch('/api/config');
+    const config = await res.json();
+    debugMode = config.global_settings?.debug || false;
+    document.getElementById('debugToggle').checked = debugMode;
+    if (debugMode) {
+      showDebugPanel();
+    }
+  } catch (e) {
+    console.error('Failed to load config:', e);
+  }
+}
+
+// ==================== API CALLS ====================
+async function loadTopics() {
+  try {
+    const res = await fetch('/api/topics');
+    topics = await res.json();
+    buildTopics();
+    updateStats();
+  } catch (e) {
+    console.error('Failed to load topics:', e);
+    document.getElementById('topicsGrid').innerHTML = 
+      '<div class="loading">加载失败，请确保 API Server 正在运行</div>';
+  }
+}
+
+async function loadPapers() {
+  try {
+    const allPapers = [];
+    
+    for (const topic of topics) {
+      const res = await fetch(`/api/topics/${topic.id}/papers?limit=100`);
+      const data = await res.json();
+      
+      for (const paper of data.papers) {
+        allPapers.push({
+          ...paper,
+          topic: topic.id,
+          topicName: topic.name,
+          color: topic.color || '#1a7a6e'
+        });
+      }
+    }
+    
+    papers = allPapers.sort((a, b) => a.arxiv_id.localeCompare(b.arxiv_id));
+    buildTabs();
+    buildPapers(currentFilter);
+  } catch (e) {
+    console.error('Failed to load papers:', e);
+    document.getElementById('papersFeed').innerHTML = 
+      '<div class="loading">加载失败，请确保 API Server 正在运行</div>';
+  }
+}
+
+async function loadTrends() {
+  try {
+    const res = await fetch('/api/trends');
+    const data = await res.json();
+    buildTrendsChart(data);
+    buildRisingList(data.rising_keywords || []);
+  } catch (e) {
+    console.error('Failed to load trends:', e);
+    // 使用默认数据
+    buildRisingList([
+      { kw: "Chain-of-Thought", delta: "+94%" },
+      { kw: "Multimodal Agents", delta: "+78%" },
+      { kw: "Constitutional AI", delta: "+65%" }
+    ]);
+  }
+}
+
+// ==================== UI BUILDERS ====================
+function setDate() {
+  const d = new Date();
+  const s = d.toLocaleDateString('zh-CN', { year:'numeric', month:'long', day:'numeric' });
+  document.getElementById('navDate').textContent = s;
+  document.getElementById('lastSync').textContent = d.toLocaleString('zh-CN');
+}
+
+function animateStats() {
+  const target = { papers: 181, topics: 6, streak: 47 };
+  const ids = { papers: 'statPapers', topics: 'statTopics', streak: 'statStreak' };
+  const duration = 1500;
+  const start = performance.now();
+  
+  function step(now) {
+    const t = Math.min((now - start) / duration, 1);
+    const ease = 1 - Math.pow(1 - t, 3);
+    Object.entries(target).forEach(([k, v]) => {
+      document.getElementById(ids[k]).textContent = Math.round(v * ease);
+    });
+    if (t < 1) requestAnimationFrame(step);
+  }
+  setTimeout(() => requestAnimationFrame(step), 600);
+}
+
+function updateStats() {
+  const totalPapers = topics.reduce((sum, t) => sum + (t.paper_count || 0), 0);
+  document.getElementById('statPapers').textContent = totalPapers;
+  document.getElementById('statTopics').textContent = topics.length;
+}
+
+function buildHeatmap() {
+  const grid = document.getElementById('heatmapGrid');
+  const cells = 26 * 7;
+  for (let i = 0; i < cells; i++) {
+    const cell = document.createElement('div');
+    cell.className = 'heatmap-cell';
+    const r = Math.random();
+    let level = 0, val = 0;
+    if (r > 0.7) { level = 1; val = Math.ceil(Math.random() * 2); }
+    if (r > 0.85) { level = 2; val = 2 + Math.ceil(Math.random() * 2); }
+    if (r > 0.93) { level = 3; val = 4 + Math.ceil(Math.random() * 3); }
+    if (r > 0.97) { level = 4; val = 7 + Math.ceil(Math.random() * 4); }
+    if (level) cell.setAttribute('data-level', level);
+    cell.setAttribute('data-val', val || 0);
+    grid.appendChild(cell);
+  }
+}
+
+function buildRecentActivity() {
+  const container = document.getElementById('recentActivity');
+  const activities = [
+    { color: "#1a7a6e", text: "<strong>系统就绪</strong>", time: "等待运行" },
+  ];
+  
+  container.innerHTML = '';
+  activities.forEach((a, i) => {
+    const div = document.createElement('div');
+    div.className = 'activity-item';
+    div.style.animationDelay = `${0.8 + i * 0.15}s`;
+    div.innerHTML = `
+      <div class="activity-dot" style="background:${a.color}"></div>
+      <div>
+        <div class="activity-text">${a.text}</div>
+        <div class="activity-time">${a.time}</div>
+      </div>`;
+    container.appendChild(div);
+  });
+}
+
+function buildTopics() {
+  const grid = document.getElementById('topicsGrid');
+  const colors = ['#1a7a6e', '#2d3a8c', '#c0392b', '#d4820a', '#4a7c59', '#5a4f8a'];
+  
+  document.getElementById('topicCount').textContent = 
+    `${topics.length} 个板块 · ${topics.reduce((a, t) => a + (t.paper_count || 0), 0)} 篇论文`;
+  
+  grid.innerHTML = '';
+  
+  topics.forEach((t, i) => {
+    const color = colors[i % colors.length];
+    const kwHtml = (t.keywords || []).slice(0, 5).map(k => 
+      `<span class="kw-tag" style="color:${color};border-color:${color}30;background:rgba(${hexToRgb(color)},0.08)">${k}</span>`
+    ).join('');
+    
+    const card = document.createElement('div');
+    card.className = 'topic-card';
+    card.onclick = () => openTopicModal(t);
+    card.innerHTML = `
+      <div class="topic-card-accent" style="background:${color}"></div>
+      <div class="topic-card-body">
+        <div class="topic-card-icon">◈</div>
+        <div class="topic-card-name">${t.name}</div>
+        <div class="topic-card-desc">${t.description || ''}</div>
+        <div class="topic-keywords">${kwHtml}</div>
+        <div class="topic-card-meta">
+          <span class="topic-paper-count">${t.paper_count || 0} 篇论文 · 更新于 ${t.updated_at || '未知'}</span>
+          <span class="topic-card-footer" style="color:${color}">浏览 →</span>
+        </div>
+      </div>`;
+    grid.appendChild(card);
+  });
+}
+
+function buildTrendsChart(data) {
+  const svg = document.getElementById('lineChartSvg');
+  const w = 600, h = 200, pad = { l: 20, r: 20, t: 20, b: 20 };
+  const chartW = w - pad.l - pad.r;
+  const chartH = h - pad.t - pad.b;
+  
+  // Grid lines
+  [0, 25, 50, 75, 100].forEach(pct => {
+    const y = pad.t + chartH * (1 - pct / 100);
+    const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    line.setAttribute('x1', pad.l); line.setAttribute('x2', w - pad.r);
+    line.setAttribute('y1', y); line.setAttribute('y2', y);
+    line.setAttribute('stroke', '#d4cec4'); line.setAttribute('stroke-width', '0.5');
+    svg.appendChild(line);
+  });
+  
+  const colors = ['#1a7a6e', '#2d3a8c', '#c0392b', '#d4820a', '#4a7c59'];
+  const legend = document.getElementById('chartLegend');
+  
+  topics.slice(0, 5).forEach((t, ti) => {
+    const monthly = data.topic_monthly?.[t.id]?.monthly || [3, 5, 7, 6, 9, 8];
+    const maxVal = Math.max(...monthly, 1);
+    
+    const points = monthly.map((v, i) => {
+      const x = pad.l + (i / 5) * chartW;
+      const y = pad.t + chartH * (1 - v / maxVal);
+      return `${x},${y}`;
+    });
+    
+    // Area fill
+    const firstX = pad.l, lastX = pad.l + chartW;
+    const area = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+    area.setAttribute('points',
+      `${firstX},${pad.t + chartH} ${points.join(' ')} ${lastX},${pad.t + chartH}`
+    );
+    area.setAttribute('fill', colors[ti]); area.setAttribute('opacity', '0.04');
+    svg.appendChild(area);
+    
+    // Line
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
+    path.setAttribute('points', points.join(' '));
+    path.setAttribute('fill', 'none');
+    path.setAttribute('stroke', colors[ti]);
+    path.setAttribute('stroke-width', ti === 0 ? '2' : '1.5');
+    path.setAttribute('stroke-linecap', 'round');
+    path.setAttribute('stroke-linejoin', 'round');
+    svg.appendChild(path);
+    
+    // Legend
+    const li = document.createElement('div');
+    li.className = 'legend-item';
+    li.innerHTML = `<div class="legend-dot" style="background:${colors[ti]}"></div>${t.name}`;
+    legend.appendChild(li);
+  });
+}
+
+function buildRisingList(keywords) {
+  const list = document.getElementById('risingList');
+  const colors = ['#1a7a6e', '#2d3a8c', '#c0392b', '#d4820a', '#4a7c59'];
+  
+  if (!keywords.length) {
+    keywords = [
+      { kw: "Chain-of-Thought", delta: "+94%" },
+      { kw: "Multimodal Agents", delta: "+78%" },
+      { kw: "Constitutional AI", delta: "+65%" },
+      { kw: "Mixture of Experts", delta: "+58%" },
+      { kw: "Test-time Compute", delta: "+51%" }
+    ];
+  }
+  
+  list.innerHTML = '';
+  keywords.slice(0, 5).forEach((item, i) => {
+    const color = colors[i % colors.length];
+    const pct = 90 - i * 15;
+    const div = document.createElement('div');
+    div.className = 'rising-item';
+    div.innerHTML = `
+      <div class="rising-rank">${String(i+1).padStart(2,'0')}</div>
+      <div class="rising-info">
+        <div class="rising-keyword">${item.kw}</div>
+        <div class="rising-bar-wrap">
+          <div class="rising-bar" data-width="${pct}" style="background:${color};width:0%"></div>
+        </div>
+      </div>
+      <div class="rising-pct" style="color:${color}">${item.delta || '+0%'}</div>`;
+    list.appendChild(div);
+  });
+  
+  setTimeout(() => {
+    document.querySelectorAll('.rising-bar').forEach(bar => {
+      bar.style.width = bar.dataset.width + '%';
+    });
+  }, 400);
+}
+
+function buildTabs() {
+  const tabBar = document.getElementById('tabBar');
+  
+  // 保留"全部"标签
+  tabBar.innerHTML = '<div class="tab active" data-topic="all">全部</div>';
+  
+  topics.forEach(t => {
+    const tab = document.createElement('div');
+    tab.className = 'tab';
+    tab.dataset.topic = t.id;
+    tab.textContent = t.name;
+    tab.onclick = () => {
+      document.querySelectorAll('.tab').forEach(tb => tb.classList.remove('active'));
+      tab.classList.add('active');
+      currentFilter = t.id;
+      buildPapers(t.id);
+    };
+    tabBar.appendChild(tab);
+  });
+  
+  document.querySelector('.tab[data-topic="all"]').onclick = () => {
+    document.querySelectorAll('.tab').forEach(tb => tb.classList.remove('active'));
+    document.querySelector('.tab[data-topic="all"]').classList.add('active');
+    currentFilter = 'all';
+    buildPapers('all');
+  };
+}
+
+function buildPapers(filter) {
+  const feed = document.getElementById('papersFeed');
+  const list = filter === 'all' ? papers : papers.filter(p => p.topic === filter);
+  
+  if (!list.length) {
+    feed.innerHTML = '<div style="padding:3rem;text-align:center;color:var(--warm-mid);font-family:DM Mono,monospace;font-size:0.72rem;letter-spacing:0.05em">— 暂无论文 —</div>';
+    return;
+  }
+  
+  feed.innerHTML = '';
+  list.forEach((p, idx) => {
+    const colors = ['#1a7a6e', '#2d3a8c', '#c0392b', '#d4820a', '#4a7c59'];
+    const color = colors[topics.findIndex(t => t.id === p.topic) % colors.length];
+    const score = Math.round((8.5 - idx * 0.3) * 10) / 10;
+    
+    const row = document.createElement('div');
+    row.className = 'paper-row';
+    row.onclick = () => openPaperModal(p);
+    row.innerHTML = `
+      <div class="paper-date">${p.updated_at || '最近'}<br>arXiv</div>
+      <div>
+        <div class="paper-title">${p.title}</div>
+        <div class="paper-abstract">${p.preview || '暂无摘要'}</div>
+        <div class="paper-tags">${(p.keywords || []).slice(0, 3).map(t => `<span class="paper-tag">${t}</span>`).join('')}</div>
+      </div>
+      <div class="paper-score-wrap">
+        <div class="paper-score">${score}</div>
+        <div class="paper-score-label">Score</div>
+        <div class="paper-topic-badge" style="color:${color};border-color:${color}40;background:rgba(${hexToRgb(color)},0.08)">${p.topicName}</div>
+      </div>`;
+    feed.appendChild(row);
+  });
+}
+
+// ==================== MODALS ====================
+function openTopicModal(t) {
+  const colors = ['#1a7a6e', '#2d3a8c', '#c0392b', '#d4820a', '#4a7c59'];
+  const color = colors[topics.findIndex(topic => topic.id === t.id) % colors.length];
+  const topicPapers = papers.filter(p => p.topic === t.id);
+  
+  document.getElementById('modalBody').innerHTML = `
+    <div class="modal-eyebrow">知识板块</div>
+    <div class="modal-title" style="color:${color}">${t.name}</div>
+    <div class="modal-meta">
+      <div class="meta-item"><div class="meta-key">论文总数</div><div class="meta-val">${t.paper_count || 0} 篇</div></div>
+      <div class="meta-item"><div class="meta-key">最近更新</div><div class="meta-val">${t.updated_at || '未知'}</div></div>
+    </div>
+    <div class="modal-text">${t.description || ''}</div>
+    <div class="modal-section-title">关键词</div>
+    <div class="topic-keywords">${(t.keywords || []).map(k => 
+      `<span class="kw-tag" style="color:${color};border-color:${color}30;background:rgba(${hexToRgb(color)},0.08)">${k}</span>`
+    ).join('')}</div>
+    ${topicPapers.length ? `<div class="modal-section-title">最近收录论文</div>
+    ${topicPapers.slice(0, 5).map(p => `
+      <div style="padding:0.8rem 0;border-bottom:1px solid var(--border);cursor:pointer" onclick="closeModal();setTimeout(()=>openPaperModal(p),300)">
+        <div style="font-family:DM Serif Display,serif;font-size:1rem;color:var(--ink);margin-bottom:0.3rem">${p.title}</div>
+        <div style="font-family:DM Mono,monospace;font-size:0.62rem;color:var(--warm-mid)">arXiv: ${p.arxiv_id}</div>
+      </div>`).join('')}` : ''}`;
+  openModal();
+}
+
+function openPaperModal(p) {
+  const colors = ['#1a7a6e', '#2d3a8c', '#c0392b', '#d4820a', '#4a7c59'];
+  const color = colors[topics.findIndex(t => t.id === p.topic) % colors.length];
+  
+  document.getElementById('modalBody').innerHTML = `
+    <div class="modal-eyebrow" style="color:${color}">${p.topicName} · arXiv:${p.arxiv_id}</div>
+    <div class="modal-title">${p.title}</div>
+    <div class="modal-meta">
+      <div class="meta-item"><div class="meta-key">相关度评分</div><div class="meta-val" style="font-family:DM Serif Display,serif;font-size:1.3rem">8.5</div></div>
+      <div class="meta-item"><div class="meta-key">arXiv ID</div><div class="meta-val" style="font-family:DM Mono,monospace;font-size:0.8rem">${p.arxiv_id}</div></div>
+    </div>
+    <div class="modal-section-title">内容预览</div>
+    <div class="modal-text">${p.preview || '暂无内容'}</div>
+    <div class="feedback-buttons">
+      <button class="feedback-btn" onclick="submitFeedback('${p.arxiv_id}', 5, ['useful'])">★ 有用</button>
+      <button class="feedback-btn" onclick="submitFeedback('${p.arxiv_id}', 1, ['not_relevant'])">✕ 不相关</button>
+      <button class="feedback-btn" onclick="submitFeedback('${p.arxiv_id}', 3, ['already_known'])">⊙ 已知</button>
+    </div>
+    <div style="margin-top:2rem;padding-top:1.5rem;border-top:1px solid var(--border)">
+      <a href="https://arxiv.org/abs/${p.arxiv_id}" target="_blank"
+        style="display:inline-block;font-family:DM Mono,monospace;font-size:0.68rem;letter-spacing:0.06em;text-transform:uppercase;color:${color};border:1px solid ${color}40;padding:0.6rem 1.2rem;border-radius:2px;text-decoration:none;transition:background 0.2s"
+        onmouseover="this.style.background='rgba(${hexToRgb(color)},0.1)'" onmouseout="this.style.background='transparent'">
+        在 arXiv 查看原文 →
+      </a>
+    </div>`;
+  openModal();
+}
+
+function openModal() {
+  document.getElementById('modalOverlay').classList.add('open');
+  document.body.style.overflow = 'hidden';
+}
+
+function closeModal() {
+  document.getElementById('modalOverlay').classList.remove('open');
+  document.body.style.overflow = '';
+}
+
+document.getElementById('modalOverlay').addEventListener('click', function(e) {
+  if (e.target === this) closeModal();
+});
+
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
+
+// ==================== RUN AGENT ====================
+async function triggerRun() {
+  const btn = document.getElementById('runBtn');
+  btn.disabled = true;
+  btn.textContent = '启动中...';
+
+  // 收集过滤条件
+  const startDateInput = document.getElementById('filterStartDate');
+  const endDateInput = document.getElementById('filterEndDate');
+  const maxPapersInput = document.getElementById('filterMaxPapers');
+  const researchQueryInput = document.getElementById('filterResearchQuery');
+
+  const startDate = startDateInput?.value ? startDateInput.value.replace(/-/g, '') : null;
+  const endDate = endDateInput?.value ? endDateInput.value.replace(/-/g, '') : null;
+  const maxResults = maxPapersInput?.value ? parseInt(maxPapersInput.value, 10) : null;
+  const researchQuery = researchQueryInput?.value?.trim() || null;
+
+  const payload = {};
+  if (startDate) payload.start_date = startDate;
+  if (endDate) payload.end_date = endDate;
+  if (Number.isFinite(maxResults) && maxResults > 0) payload.max_results = maxResults;
+  if (researchQuery) payload.research_query = researchQuery;
+
+  try {
+    const res = await fetch('/api/run/trigger', { 
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: Object.keys(payload).length ? JSON.stringify(payload) : null
+    });
+    const data = await res.json();
+    
+    if (res.ok) {
+      showRunPanel();
+      connectSSE(data.run_id);
+    } else {
+      alert(data.detail || '启动失败');
+      btn.disabled = false;
+      btn.textContent = '运行 Agent';
+    }
+  } catch (e) {
+    alert('连接失败，请确保 API Server 正在运行');
+    btn.disabled = false;
+    btn.textContent = '运行 Agent';
+  }
+}
+
+function showRunPanel() {
+  document.getElementById('runPanel').classList.add('visible');
+  resetRunStatus();
+}
+
+function closeRunPanel() {
+  document.getElementById('runPanel').classList.remove('visible');
+  if (runEventSource) {
+    runEventSource.close();
+    runEventSource = null;
+  }
+}
+
+function resetRunStatus() {
+  ['fetcher', 'screener', 'analyst'].forEach(stage => {
+    document.getElementById(`stage${capitalize(stage)}`).className = 'stage-dot';
+    document.getElementById(`status${capitalize(stage)}`).textContent = '等待';
+  });
+  document.getElementById('progressFill').style.width = '0%';
+  document.getElementById('progressText').textContent = '0%';
+}
+
+function connectSSE(runId) {
+  runEventSource = new EventSource('/api/run/stream');
+  
+  // 在debug模式下同时连接debug事件
+  let debugEventSource = null;
+  if (debugMode) {
+    debugEventSource = connectDebugEvents(runId);
+    addDebugEvent('pipeline_start', `开始运行: ${runId}`, 'info');
+  }
+  
+  runEventSource.addEventListener('pipeline_start', e => {
+    const data = JSON.parse(e.data);
+    document.getElementById('runPanelTitle').textContent = `运行中: ${data.run_id}`;
+  });
+  
+  runEventSource.addEventListener('stage_start', e => {
+    const data = JSON.parse(e.data);
+    const stage = capitalize(data.stage);
+    document.getElementById(`stage${stage}`).className = 'stage-dot active';
+    document.getElementById(`status${stage}`).textContent = '进行中';
+    if (debugMode) {
+      addDebugEvent('stage_start', `阶段开始: ${data.stage} - ${data.message}`, 'info');
+    }
+  });
+  
+  runEventSource.addEventListener('stage_done', e => {
+    const data = JSON.parse(e.data);
+    const stage = capitalize(data.stage);
+    document.getElementById(`stage${stage}`).className = 'stage-dot done';
+    document.getElementById(`status${stage}`).textContent = `完成: ${JSON.stringify(data.result)}`;
+    if (debugMode) {
+      addDebugEvent('stage_done', `阶段完成: ${data.stage}`, 'success');
+    }
+  });
+  
+  runEventSource.addEventListener('paper_analyzed', e => {
+    const data = JSON.parse(e.data);
+    const progress = data.progress;
+    const pct = Math.round((progress.current / progress.total) * 100);
+    document.getElementById('progressFill').style.width = `${pct}%`;
+    document.getElementById('progressText').textContent = `${progress.current}/${progress.total} 篇`;
+    if (debugMode) {
+      addDebugEvent('paper_analyzed', `论文分析完成: ${data.arxiv_id}`, 'success');
+    }
+  });
+  
+  runEventSource.addEventListener('pipeline_done', e => {
+    const data = JSON.parse(e.data);
+    const btn = document.getElementById('runBtn');
+    btn.disabled = false;
+    btn.textContent = '运行 Agent';
+    
+    if (data.status === 'completed') {
+      document.getElementById('runPanelTitle').textContent = '运行完成';
+      if (debugMode) {
+        addDebugEvent('pipeline_done', `运行完成! 抓取:${data.summary.fetched} 筛选:${data.summary.selected} 分析:${data.summary.analyzed}`, 'success');
+      }
+      alert(`运行完成！抓取: ${data.summary.fetched}, 筛选: ${data.summary.selected}, 分析: ${data.summary.analyzed}`);
+      // 刷新数据
+      loadTopics();
+      loadPapers();
+    } else {
+      document.getElementById('runPanelTitle').textContent = '运行失败';
+      if (debugMode) {
+        addDebugEvent('pipeline_failed', `运行失败: ${data.error}`, 'error');
+      }
+      alert(`运行失败: ${data.error}`);
+    }
+    
+    setTimeout(() => {
+      closeRunPanel();
+    }, 3000);
+  });
+  
+  runEventSource.onerror = () => {
+    console.log('SSE connection closed');
+    if (debugEventSource) {
+      debugEventSource.close();
+    }
+  };
+}
+
+async function submitFeedback(arxivId, rating, tags) {
+  try {
+    await fetch(`/api/papers/${arxivId}/feedback`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ rating, tags })
+    });
+    alert('反馈已提交');
+    closeModal();
+  } catch (e) {
+    alert('提交失败');
+  }
+}
+
+// ==================== DEBUG FUNCTIONS ====================
+async function toggleDebug() {
+  const debugEnabled = document.getElementById('debugToggle').checked;
+  try {
+    await fetch('/api/config/debug', {
+      method: 'PUT',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ debug: debugEnabled })
+    });
+    debugMode = debugEnabled;
+    if (debugMode) {
+      showDebugPanel();
+      addDebugEvent('debug_enabled', '调试模式已开启', 'success');
+    } else {
+      closeDebugPanel();
+      addDebugEvent('debug_disabled', '调试模式已关闭', 'info');
+    }
+  } catch (e) {
+    alert('更新调试设置失败');
+    document.getElementById('debugToggle').checked = debugMode;
+  }
+}
+
+function showDebugPanel() {
+  document.getElementById('debugPanel').classList.add('visible');
+}
+
+function closeDebugPanel() {
+  document.getElementById('debugPanel').classList.remove('visible');
+}
+
+function addDebugEvent(event, message, type = 'info') {
+  const timestamp = new Date().toLocaleTimeString();
+  debugEvents.push({ event, message, type, timestamp });
+  
+  // 只保留最近50条
+  if (debugEvents.length > 50) {
+    debugEvents.shift();
+  }
+  
+  renderDebugEvents();
+}
+
+function renderDebugEvents() {
+  const container = document.getElementById('debugContent');
+  if (!container) return;
+  
+  container.innerHTML = debugEvents.map(e => `
+    <div class="debug-item">
+      <span class="debug-event">${e.event}</span>: 
+      <span class="debug-${e.type}">${e.message}</span>
+      <span class="debug-time">${e.timestamp}</span>
+    </div>
+  `).join('');
+  
+  // 自动滚动到底部
+  container.scrollTop = container.scrollHeight;
+}
+
+function connectDebugEvents(runId) {
+  if (!debugMode) return;
+  
+  const debugEventSource = new EventSource('/api/run/stream');
+  
+  // 监听所有debug开头的SSE事件
+  const debugEventTypes = [
+    'debug_pipeline_start',
+    'debug_fetcher_start',
+    'debug_arxiv_connect',
+    'debug_fetcher_done',
+    'debug_screener_start',
+    'debug_screening_params',
+    'debug_screener_done',
+    'debug_analyst_start',
+    'debug_pdf_download_start',
+    'debug_pdf_download_done',
+    'debug_pdf_download_failed',
+    'debug_paper_analysis_start',
+    'debug_paper_file_created',
+    'debug_analyst_done',
+    'debug_e2e_complete',
+    'debug_sdk_call',
+    'debug_sdk_result',
+    'debug_sdk_error'
+  ];
+  
+  debugEventTypes.forEach(eventType => {
+    debugEventSource.addEventListener(eventType, e => {
+      const data = JSON.parse(e.data);
+      let message = '';
+      let displayType = 'info';
+      
+      // 格式化不同类型的事件消息
+      switch(eventType) {
+        case 'debug_arxiv_connect':
+          message = `正在连接 arXiv，分类: ${data.categories?.join(', ')}`;
+          break;
+        case 'debug_fetcher_done':
+          message = `抓取完成，获取 ${data.fetched_count} 篇论文`;
+          displayType = 'success';
+          break;
+        case 'debug_pdf_download_start':
+          message = `开始下载 PDF: ${data.arxiv_id}`;
+          break;
+        case 'debug_pdf_download_done':
+          message = `PDF 下载成功: ${data.arxiv_id} (${data.topic})`;
+          displayType = 'success';
+          break;
+        case 'debug_pdf_download_failed':
+          message = `PDF 下载失败: ${data.arxiv_id} - ${data.error}`;
+          displayType = 'error';
+          break;
+        case 'debug_paper_file_created':
+          message = `论文文件 ${data.file_exists ? '已创建' : '未找到'}: ${data.arxiv_id}`;
+          displayType = data.file_exists ? 'success' : 'error';
+          break;
+        case 'debug_e2e_complete':
+          message = `端到端完成! 抓取:${data.fetched} 筛选:${data.selected} 分析:${data.analyzed} PDF下载:${data.pdf_downloads_count}`;
+          displayType = 'success';
+          break;
+        case 'debug_sdk_call':
+          message = `SDK调用: ${data.goal?.substring(0, 50)}...`;
+          break;
+        case 'debug_sdk_result':
+          message = `SDK返回: ${data.status}, trace长度: ${data.trace_length}`;
+          displayType = data.status === 'completed' ? 'success' : 'info';
+          break;
+        case 'debug_sdk_error':
+          message = `SDK错误: ${data.error}`;
+          displayType = 'error';
+          break;
+        default:
+          message = JSON.stringify(data).substring(0, 100);
+      }
+      
+      addDebugEvent(eventType.replace('debug_', ''), message, displayType);
+    });
+  });
+  
+  return debugEventSource;
+}
+
+// ==================== UTILS ====================
+function capitalize(s) {
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+function hexToRgb(hex) {
+  const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+  return result ? 
+    `${parseInt(result[1], 16)}, ${parseInt(result[2], 16)}, ${parseInt(result[3], 16)}` : 
+    '26, 122, 110';
+}
+
+</script>
+</body>
+</html>

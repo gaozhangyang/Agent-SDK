@@ -1,0 +1,920 @@
+#!/usr/bin/env python3
+"""
+api_server.py — Survey Agent Web API Server
+
+运行: python api_server.py  (port 8000)
+
+依赖:
+    pip install fastapi uvicorn python-frontmatter markdown requests schedule feedparser
+
+API 端点:
+    GET  /api/topics                  - 获取所有知识板块
+    GET  /api/topics/:id/papers       - 获取指定板块的论文列表
+    GET  /api/papers/:arxiv_id        - 获取单篇论文详情
+    GET  /api/run/status              - 获取当前运行状态
+    POST /api/run/trigger             - 手动触发一次完整流水线
+    GET  /api/run/stream               - SSE 实时推送 Agent 进度事件
+    POST /api/papers/:arxiv_id/feedback - 保存用户对论文的评分/标注
+    PUT  /api/config/topics           - 修改用户兴趣配置
+    GET  /api/trends                  - 获取趋势数据
+    GET  /api/config                  - 获取配置（脱敏）
+"""
+
+import asyncio
+import json
+import os
+import sys
+import threading
+from datetime import datetime, timedelta
+from pathlib import Path
+from typing import Optional, List, Dict, Any
+
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
+
+# 基础路径配置
+BASE_DIR = Path(__file__).parent.absolute()
+KB_DIR = BASE_DIR / "knowledge_base"
+DATA_DIR = BASE_DIR / "data"
+CONFIG_FILE = BASE_DIR / "config" / "user_config.json"
+
+# 创建必要目录
+DATA_DIR.mkdir(parents=True, exist_ok=True)
+(KB_DIR / "pdfs").mkdir(parents=True, exist_ok=True)
+
+app = FastAPI(title="Survey Agent API", version="1.0.0")
+
+# CORS 配置
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# 全局运行状态
+run_state: Dict[str, Any] = {
+    "status": "idle",  # idle | running | completed | failed
+    "run_id": None,
+    "stage": None,
+    "progress": {"current": 0, "total": 0},
+    "summary": {},
+    "started_at": None,
+    "finished_at": None,
+    "message": "",
+}
+
+# SSE 客户端连接池
+sse_clients: List[asyncio.Queue] = []
+main_loop: Optional[asyncio.AbstractEventLoop] = None
+
+
+class RunTriggerRequest(BaseModel):
+    """前端触发运行时可选的过滤参数"""
+
+    start_date: Optional[str] = None  # YYYYMMDD
+    end_date: Optional[str] = None  # YYYYMMDD
+    max_results: Optional[int] = None
+    research_query: Optional[str] = None
+
+
+def broadcast(event: str, data: Dict[str, Any]):
+    """从后台线程向所有 SSE 客户端广播事件（线程安全）"""
+    if not sse_clients:
+        return
+
+    msg = f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+    def _put(q):
+        try:
+            asyncio.run_coroutine_threadsafe(q.put(msg), main_loop)
+        except Exception:
+            pass
+
+    for q in sse_clients:
+        try:
+            _put(q)
+        except Exception:
+            pass
+
+
+def load_config() -> Dict[str, Any]:
+    """加载用户配置"""
+    if not CONFIG_FILE.exists():
+        return {
+            "topics": [],
+            "global_settings": {
+                "fetch_max_papers": 5,
+                "screening_threshold": 7.0,
+                "schedule_utc_hour": 8,
+                "debug": False,
+                "llm": {
+                    "baseUrl": "http://35.220.164.252:3888/v1",
+                    "model": "MiniMax-M2.5",
+                    "apiKey": "",
+                },
+                "sdk_url": "http://127.0.0.1:3890",
+            },
+        }
+
+    with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def save_config(config: Dict[str, Any]):
+    """保存用户配置"""
+    with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+        json.dump(config, f, ensure_ascii=False, indent=2)
+
+
+def run_pipeline_thread(
+    run_id: str, config: Dict[str, Any], options: Optional[Dict[str, Any]] = None
+):
+    """后台线程：执行完整 Agent 流水线，通过 broadcast 推送进度"""
+    import requests as req
+
+    SDK_URL = config["global_settings"]["sdk_url"]
+    DEBUG_MODE = config["global_settings"].get("debug", False)
+    today = datetime.now().strftime("%Y-%m-%d")
+
+    # 本次运行的可选过滤参数
+    options = options or {}
+    start_date = options.get("start_date")
+    end_date = options.get("end_date")
+    max_results = options.get("max_results") or config["global_settings"][
+        "fetch_max_papers"
+    ]
+    research_query = options.get("research_query")
+
+    def debug_broadcast(event: str, data: Dict[str, Any]):
+        """仅在debug模式下发送调试事件"""
+        if DEBUG_MODE:
+            broadcast(f"debug_{event}", data)
+
+    def sdk_run(goal: str, sources: List[Dict], msg: str = "") -> Dict:
+        """调用 SDK /run 接口"""
+        broadcast(
+            "agent_progress",
+            {"stage": run_state["stage"], "message": msg or goal[:100]},
+        )
+
+        # Debug: 显示正在调用的sources
+        debug_broadcast(
+            "sdk_call",
+            {
+                "goal": goal[:200],
+                "sources": [s.get("query", str(s))[:100] for s in sources],
+                "timestamp": datetime.now().isoformat(),
+            },
+        )
+
+        try:
+            r = req.post(
+                f"{SDK_URL}/run",
+                json={
+                    "goal": goal,
+                    "workDir": str(BASE_DIR),
+                    "collectConfig": {"sources": sources, "maxTokens": 6000},
+                    "llm": config["global_settings"]["llm"],
+                    "thresholds": {"maxIterations": 50, "maxNoProgress": 5},
+                    "debug": DEBUG_MODE,
+                },
+                timeout=600,
+            )
+            result = r.json()
+
+            # Debug: 显示SDK返回结果
+            debug_broadcast(
+                "sdk_result",
+                {
+                    "status": result.get("status"),
+                    "trace_length": result.get("traceLength", 0),
+                    "timestamp": datetime.now().isoformat(),
+                },
+            )
+
+            return result
+        except Exception as e:
+            debug_broadcast(
+                "sdk_error", {"error": str(e), "timestamp": datetime.now().isoformat()}
+            )
+            return {"status": "error", "reason": str(e)}
+
+    try:
+        run_state["status"] = "running"
+        broadcast(
+            "pipeline_start",
+            {"run_id": run_id, "date": today, "debug_mode": DEBUG_MODE},
+        )
+
+        if DEBUG_MODE:
+            debug_broadcast(
+                "pipeline_start",
+                {"run_id": run_id, "timestamp": datetime.now().isoformat()},
+            )
+
+        # === Step 1: Fetcher ===
+        run_state["stage"] = "fetcher"
+        broadcast(
+            "stage_start", {"stage": "fetcher", "message": "开始从 arXiv 抓取论文..."}
+        )
+
+        # 直接使用本地脚本获取论文，不依赖 SDK
+        import subprocess
+        
+        cats = list({c for t in config["topics"] for c in t["arxiv_categories"]})
+        cats_str = ",".join(cats)
+        raw_file = DATA_DIR / f"raw_papers_{today}.json"
+
+        debug_broadcast(
+            "fetcher_start",
+            {
+                "categories": cats,
+                "max_results": max_results,
+                "start_date": start_date,
+                "end_date": end_date,
+                "timestamp": datetime.now().isoformat(),
+            },
+        )
+
+        try:
+            fetch_script = BASE_DIR / "scripts" / "fetch_arxiv.py"
+            cmd = [
+                "python3",
+                str(fetch_script),
+                "-c",
+                cats_str,
+                "-m",
+                str(max_results),
+                "-o",
+                str(raw_file),
+            ]
+            if start_date:
+                cmd.extend(["-s", start_date])
+            if end_date:
+                cmd.extend(["-e", end_date])
+
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+            if result.returncode != 0:
+                raise RuntimeError(f"Fetch failed: {result.stderr}")
+
+            raw_count = 0
+            if raw_file.exists():
+                with open(raw_file, "r", encoding="utf-8") as f:
+                    raw_papers = json.load(f)
+                    raw_count = len(raw_papers)
+        except Exception as e:
+            print(f"[ERROR] Fetcher failed: {e}", file=sys.stderr)
+            raw_count = 0
+
+        run_state["summary"]["fetched"] = raw_count
+
+        # Debug: 显示抓取结果
+        debug_broadcast(
+            "fetcher_done",
+            {
+                "fetched_count": raw_count,
+                "file_path": str(raw_file),
+                "timestamp": datetime.now().isoformat(),
+            },
+        )
+
+        broadcast("stage_done", {"stage": "fetcher", "result": {"fetched": raw_count}})
+
+        # === Step 2: Screener ===
+        run_state["stage"] = "screener"
+        broadcast(
+            "stage_start",
+            {"stage": "screener", "message": f"筛选 {raw_count} 篇论文..."},
+        )
+
+        # 读取黑名单
+        bl_path = DATA_DIR / "blacklist.json"
+        blacklist = json.loads(bl_path.read_text()) if bl_path.exists() else []
+
+        threshold = config["global_settings"]["screening_threshold"]
+
+        # Debug: 显示筛选参数
+        debug_broadcast(
+            "screening_params",
+            {
+                "threshold": threshold,
+                "blacklist_count": len(blacklist),
+                "research_query": research_query,
+                "timestamp": datetime.now().isoformat(),
+            },
+        )
+
+        # 直接使用本地脚本筛选论文，不依赖 SDK
+        selected_file = DATA_DIR / f"selected_papers_{today}.json"
+
+        try:
+            screen_script = BASE_DIR / "scripts" / "screen_papers.py"
+            cmd = [
+                "python3",
+                str(screen_script),
+                str(raw_file),
+                str(selected_file),
+                "--threshold",
+                str(threshold),
+                "--topics",
+                str(KB_DIR),
+            ]
+            if research_query:
+                cmd.extend(["--query", research_query])
+
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+            if result.returncode != 0:
+                raise RuntimeError(f"Screening failed: {result.stderr}")
+            print(f"[DEBUG] Screen output: {result.stdout}", file=sys.stderr)
+        except Exception as e:
+            print(f"[ERROR] Screener failed: {e}", file=sys.stderr)
+            # 创建空的 selected 文件
+            selected_file.write_text("[]")
+
+        # 读取筛选结果
+        selected = []
+        selected_count = 0
+        if selected_file.exists():
+            with open(selected_file, "r", encoding="utf-8") as f:
+                selected = json.load(f)
+                selected_count = len(selected)
+
+        run_state["summary"]["selected"] = selected_count
+
+        # Debug: 显示筛选结果
+        debug_broadcast(
+            "screener_done",
+            {
+                "selected_count": selected_count,
+                "file_path": str(selected_file),
+                "timestamp": datetime.now().isoformat(),
+            },
+        )
+
+        broadcast(
+            "stage_done", {"stage": "screener", "result": {"selected": selected_count}}
+        )
+
+        # === Step 3: Analyst（逐篇）===
+        run_state["stage"] = "analyst"
+        run_state["progress"] = {"current": 0, "total": selected_count}
+        broadcast(
+            "stage_start",
+            {"stage": "analyst", "message": f"精读 {selected_count} 篇论文..."},
+        )
+
+        if DEBUG_MODE:
+            debug_broadcast(
+                "analyst_start",
+                {
+                    "total_papers": selected_count,
+                    "timestamp": datetime.now().isoformat(),
+                },
+            )
+
+        analyzed = failed = 0
+        pdf_downloads = []
+        pdf_failures = []
+
+        if selected_count > 0:
+            for i, paper in enumerate(selected):
+                try:
+                    target_topic = paper.get("target_topic", "unknown")
+                    arxiv_id = paper.get("arxiv_id", "")
+
+                    # Debug: 显示即将分析的论文信息
+                    debug_broadcast(
+                        "paper_analysis_start",
+                        {
+                            "arxiv_id": arxiv_id,
+                            "title": paper.get("title", "")[:100],
+                            "topic": target_topic,
+                            "progress": {"current": i + 1, "total": selected_count},
+                            "timestamp": datetime.now().isoformat(),
+                        },
+                    )
+
+                    # 直接使用本地脚本下载PDF，而不是让SDK Agent自己决定如何下载
+                    pdf_url = f"https://arxiv.org/pdf/{arxiv_id}.pdf"
+                    # 使用配置中的 pdf_download_dir
+                    pdf_download_dir = config["global_settings"].get(
+                        "pdf_download_dir", str(DATA_DIR / "pdfs")
+                    )
+                    pdf_dir = Path(pdf_download_dir)
+                    pdf_dir.mkdir(parents=True, exist_ok=True)
+                    pdf_path = pdf_dir / f"{arxiv_id}.pdf"
+
+                    debug_broadcast(
+                        "pdf_download_start",
+                        {
+                            "arxiv_id": arxiv_id,
+                            "pdf_url": pdf_url,
+                            "target_path": str(pdf_path),
+                            "timestamp": datetime.now().isoformat(),
+                        },
+                    )
+
+                    # 调用本地Python脚本下载PDF
+                    try:
+                        import subprocess
+
+                        download_script = BASE_DIR / "scripts" / "download_pdf.py"
+                        result = subprocess.run(
+                            ["python3", str(download_script), arxiv_id, str(pdf_path)],
+                            capture_output=True,
+                            text=True,
+                            timeout=60,
+                        )
+                        if result.returncode != 0:
+                            raise RuntimeError(f"PDF download failed: {result.stderr}")
+                        if not pdf_path.exists():
+                            raise RuntimeError(f"PDF file not created at {pdf_path}")
+                        pdf_downloads.append(arxiv_id)
+
+                        debug_broadcast(
+                            "pdf_download_done",
+                            {
+                                "arxiv_id": arxiv_id,
+                                "topic": target_topic,
+                                "pdf_path": str(pdf_path),
+                                "timestamp": datetime.now().isoformat(),
+                            },
+                        )
+                    except Exception as pdf_error:
+                        pdf_failures.append(
+                            {"arxiv_id": arxiv_id, "error": str(pdf_error)}
+                        )
+                        debug_broadcast(
+                            "pdf_download_failed",
+                            {
+                                "arxiv_id": arxiv_id,
+                                "error": str(pdf_error),
+                                "timestamp": datetime.now().isoformat(),
+                            },
+                        )
+                        # PDF下载失败时跳过这篇论文
+                        broadcast(
+                            "paper_failed",
+                            {
+                                "arxiv_id": arxiv_id,
+                                "reason": f"PDF download failed: {pdf_error}",
+                            },
+                        )
+                        failed += 1
+                        run_state["progress"]["current"] = i + 1
+                        continue
+
+                    res = sdk_run(
+                        f"深度分析 {paper['arxiv_id']}（{paper['title']}），"
+                        f"PDF已下载到{pdf_path}，生成总结，写入knowledge_base/{target_topic}/paper_{paper['arxiv_id']}.md，"
+                        f"更新meta.json",
+                        [
+                            {"type": "file", "query": "templates/paper_summary.md"},
+                            {
+                                "type": "file",
+                                "query": f"knowledge_base/{target_topic}/meta.json",
+                            },
+                            {
+                                "type": "file",
+                                "query": str(pdf_path),
+                            },
+                        ],
+                        f"正在分析: {paper['title'][:40]}...",
+                    )
+
+                    if res.get("status") in (
+                        "completed",
+                        "escalated",
+                        "budget_exceeded",
+                    ):
+                        analyzed += 1
+
+                        # Debug: 检查生成的文件是否存在
+                        paper_file = KB_DIR / target_topic / f"paper_{arxiv_id}.md"
+                        debug_broadcast(
+                            "paper_file_created",
+                            {
+                                "arxiv_id": arxiv_id,
+                                "file_path": str(paper_file),
+                                "file_exists": paper_file.exists(),
+                                "timestamp": datetime.now().isoformat(),
+                            },
+                        )
+
+                        broadcast(
+                            "paper_analyzed",
+                            {
+                                "arxiv_id": paper["arxiv_id"],
+                                "title": paper["title"],
+                                "topic": target_topic,
+                                "score": paper.get("relevance_score"),
+                                "progress": {"current": i + 1, "total": selected_count},
+                            },
+                        )
+                    else:
+                        raise RuntimeError(res.get("reason", "Analysis failed"))
+
+                except Exception as e:
+                    failed += 1
+                    pdf_failures.append(
+                        {"arxiv_id": paper.get("arxiv_id", ""), "error": str(e)}
+                    )
+
+                    # Debug: 显示PDF下载失败
+                    debug_broadcast(
+                        "pdf_download_failed",
+                        {
+                            "arxiv_id": paper.get("arxiv_id", ""),
+                            "error": str(e),
+                            "timestamp": datetime.now().isoformat(),
+                        },
+                    )
+
+                    broadcast(
+                        "paper_failed",
+                        {"arxiv_id": paper["arxiv_id"], "reason": str(e)},
+                    )
+
+                run_state["progress"]["current"] = i + 1
+
+        run_state["status"] = "completed"
+        run_state["finished_at"] = datetime.now().isoformat()
+        run_state["summary"].update({"analyzed": analyzed, "failed": failed})
+
+        # Debug: 显示最终统计
+        debug_broadcast(
+            "analyst_done",
+            {
+                "analyzed_count": analyzed,
+                "failed_count": failed,
+                "pdf_downloads": pdf_downloads,
+                "pdf_failures": pdf_failures,
+                "timestamp": datetime.now().isoformat(),
+            },
+        )
+
+        # Debug: 发送端到端完成事件，用于网页端验证
+        debug_broadcast(
+            "e2e_complete",
+            {
+                "run_id": run_id,
+                "fetched": run_state["summary"].get("fetched", 0),
+                "selected": run_state["summary"].get("selected", 0),
+                "analyzed": analyzed,
+                "pdf_downloads_count": len(pdf_downloads),
+                "timestamp": datetime.now().isoformat(),
+            },
+        )
+
+        broadcast(
+            "pipeline_done",
+            {
+                "run_id": run_id,
+                "status": "completed",
+                "summary": run_state["summary"],
+                "duration_sec": 0,  # 可添加时间计算
+            },
+        )
+
+        # 写入运行日志
+        log_entry = {
+            "run_id": run_id,
+            "date": today,
+            "status": "completed",
+            "summary": run_state["summary"],
+            "started_at": run_state["started_at"],
+            "finished_at": run_state["finished_at"],
+        }
+        log_file = DATA_DIR / "run_log.jsonl"
+        with open(log_file, "a", encoding="utf-8") as f:
+            f.write(json.dumps(log_entry, ensure_ascii=False) + "\n")
+
+        run_state["status"] = "idle"
+
+    except Exception as e:
+        run_state["status"] = "failed"
+        run_state["message"] = str(e)
+        broadcast(
+            "pipeline_done", {"run_id": run_id, "status": "failed", "error": str(e)}
+        )
+        print(f"Pipeline error: {e}", file=sys.stderr)
+
+
+# ==================== API 路由 ====================
+
+
+@app.on_event("startup")
+async def startup():
+    global main_loop
+    main_loop = asyncio.get_event_loop()
+
+    # 初始化空数据文件
+    for f in ["feedback.json", "blacklist.json"]:
+        fpath = DATA_DIR / f
+        if not fpath.exists():
+            fpath.write_text("{}")
+
+
+@app.get("/api/topics")
+async def get_topics():
+    """获取所有知识板块"""
+    topics = []
+    for meta_path in sorted(KB_DIR.glob("*/meta.json")):
+        try:
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+            topic_id = meta_path.parent.name
+            paper_count = len(list(meta_path.parent.glob("paper_*.md")))
+
+            topics.append(
+                {
+                    "id": topic_id,
+                    "name": meta.get("name", topic_id),
+                    "description": meta.get("description", ""),
+                    "keywords": meta.get("keywords", []),
+                    "paper_count": paper_count,
+                    "updated_at": meta.get("updated_at", ""),
+                    "arxiv_categories": meta.get("arxiv_categories", []),
+                }
+            )
+        except Exception as e:
+            print(f"Error reading {meta_path}: {e}", file=sys.stderr)
+
+    return topics
+
+
+@app.get("/api/topics/{topic_id}/papers")
+async def get_papers(topic_id: str, page: int = 1, limit: int = 20):
+    """获取指定板块的论文列表"""
+    topic_dir = KB_DIR / topic_id
+    if not topic_dir.exists():
+        raise HTTPException(status_code=404, detail="Topic not found")
+
+    papers = []
+    for p in sorted(topic_dir.glob("paper_*.md"), reverse=True):
+        try:
+            content = p.read_text(encoding="utf-8")
+            # 简单解析 front-matter (title 在第一行)
+            lines = content.split("\n")
+            title = lines[0].replace("# ", "").strip() if lines else p.stem
+
+            # 提取 arxiv_id
+            arxiv_id = p.stem.replace("paper_", "")
+
+            papers.append(
+                {
+                    "arxiv_id": arxiv_id,
+                    "title": title,
+                    "preview": content[:300],
+                    "filename": p.name,
+                }
+            )
+        except Exception as e:
+            print(f"Error reading {p}: {e}", file=sys.stderr)
+
+    total = len(papers)
+    start = (page - 1) * limit
+    end = start + limit
+
+    return {
+        "papers": papers[start:end],
+        "total": total,
+        "page": page,
+        "total_pages": (total + limit - 1) // limit,
+    }
+
+
+@app.get("/api/papers/{arxiv_id}")
+async def get_paper(arxiv_id: str):
+    """获取单篇论文详情"""
+    # 搜索论文
+    for paper_file in KB_DIR.glob("*/paper_*.md"):
+        if arxiv_id in paper_file.stem:
+            content = paper_file.read_text(encoding="utf-8")
+            topic = paper_file.parent.name
+
+            return {
+                "arxiv_id": arxiv_id,
+                "content": content,
+                "topic": topic,
+                "html_content": content,  # 可以添加 markdown 转换
+            }
+
+    raise HTTPException(status_code=404, detail="Paper not found")
+
+
+@app.get("/api/run/status")
+async def run_status():
+    """获取当前运行状态"""
+    return run_state
+
+
+@app.post("/api/run/trigger")
+async def trigger_run(body: Optional[RunTriggerRequest] = None):
+    """手动触发一次完整流水线，可附带过滤参数"""
+    if run_state["status"] == "running":
+        raise HTTPException(status_code=409, detail="Pipeline already running")
+
+    config = load_config()
+    run_id = f"run_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+
+    options: Dict[str, Any] = body.dict() if body else {}
+
+    run_state.update(
+        {
+            "run_id": run_id,
+            "started_at": datetime.now().isoformat(),
+            "status": "starting",
+            "stage": None,
+            "summary": {},
+            "message": "",
+            "options": options,
+        }
+    )
+
+    thread = threading.Thread(
+        target=run_pipeline_thread, args=(run_id, config, options), daemon=True
+    )
+    thread.start()
+
+    return {"run_id": run_id, "status": "started", "options": options}
+
+
+@app.get("/api/run/stream")
+async def run_stream():
+    """SSE 实时推送"""
+    q = asyncio.Queue()
+    sse_clients.append(q)
+
+    async def gen():
+        try:
+            while True:
+                try:
+                    msg = await asyncio.wait_for(q.get(), timeout=15)
+                    yield msg
+                except asyncio.TimeoutError:
+                    yield f"event: heartbeat\ndata: {json.dumps({'ts': int(datetime.now().timestamp())})}\n\n"
+        finally:
+            if q in sse_clients:
+                sse_clients.remove(q)
+
+    return StreamingResponse(
+        gen(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@app.post("/api/papers/{arxiv_id}/feedback")
+async def save_feedback(arxiv_id: str, body: dict):
+    """保存用户对论文的评分"""
+    fb_path = DATA_DIR / "feedback.json"
+
+    try:
+        feedback = (
+            json.loads(fb_path.read_text(encoding="utf-8")) if fb_path.exists() else {}
+        )
+    except:
+        feedback = {}
+
+    feedback[arxiv_id] = {**body, "ts": datetime.now().isoformat()}
+
+    fb_path.write_text(json.dumps(feedback, ensure_ascii=False, indent=2))
+
+    # 如果评分 <= 2，加入黑名单
+    rating = body.get("rating", 5)
+    if rating <= 2:
+        bl_path = DATA_DIR / "blacklist.json"
+        try:
+            blacklist = (
+                json.loads(bl_path.read_text(encoding="utf-8"))
+                if bl_path.exists()
+                else []
+            )
+        except:
+            blacklist = []
+
+        if arxiv_id not in blacklist:
+            blacklist.append(arxiv_id)
+            bl_path.write_text(json.dumps(blacklist, indent=2))
+
+    return {"ok": True}
+
+
+@app.get("/api/config")
+async def get_config():
+    """获取配置（脱敏）"""
+    config = load_config()
+
+    # 脱敏
+    if "apiKey" in config.get("global_settings", {}).get("llm", {}):
+        config["global_settings"]["llm"]["apiKey"] = "***"
+
+    return config
+
+
+@app.put("/api/config/debug")
+async def update_debug_config(body: dict):
+    """更新debug配置"""
+    config = load_config()
+    debug_enabled = body.get("debug", False)
+
+    if "global_settings" not in config:
+        config["global_settings"] = {}
+
+    config["global_settings"]["debug"] = debug_enabled
+    save_config(config)
+
+    return {"ok": True, "debug": debug_enabled}
+
+
+@app.put("/api/config/topics")
+async def update_topics(body: dict):
+    """更新主题配置"""
+    config = load_config()
+    config["topics"] = body.get("topics", [])
+    save_config(config)
+    return {"ok": True, "effective_at": "next_run"}
+
+
+@app.get("/api/trends")
+async def get_trends(days: int = 90):
+    """获取趋势数据"""
+    trends = {"daily_counts": {}, "topic_monthly": {}, "rising_keywords": []}
+
+    # 读取历史运行日志
+    log_file = DATA_DIR / "run_log.jsonl"
+    if log_file.exists():
+        with open(log_file, "r", encoding="utf-8") as f:
+            for line in f:
+                try:
+                    entry = json.loads(line)
+                    date = entry.get("date", "")
+                    summary = entry.get("summary", {})
+
+                    if date:
+                        trends["daily_counts"][date] = summary.get("fetched", 0)
+                except:
+                    pass
+
+    # 读取各板块的论文统计
+    for topic_dir in KB_DIR.iterdir():
+        if topic_dir.is_dir() and (topic_dir / "meta.json").exists():
+            meta = json.loads((topic_dir / "meta.json").read_text(encoding="utf-8"))
+            topic_id = topic_dir.name
+            trends["topic_monthly"][topic_id] = {
+                "name": meta.get("name", topic_id),
+                "paper_count": meta.get("paper_count", 0),
+            }
+
+    return trends
+
+
+@app.get("/api/run/history")
+async def get_history(limit: int = 10):
+    """获取历史运行记录"""
+    log_file = DATA_DIR / "run_log.jsonl"
+    history = []
+
+    if log_file.exists():
+        with open(log_file, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+            for line in reversed(lines[-limit:]):
+                try:
+                    history.append(json.loads(line))
+                except:
+                    pass
+
+    return history
+
+
+# 静态文件服务
+from fastapi.staticfiles import StaticFiles
+
+# 挂载前端静态文件
+frontend_dir = BASE_DIR / "frontend"
+if frontend_dir.exists():
+    app.mount("/", StaticFiles(directory=str(frontend_dir), html=True), name="frontend")
+
+
+if __name__ == "__main__":
+    import uvicorn
+
+    print(f"Survey Agent API Server starting at http://0.0.0.0:8000")
+    print(f"Base directory: {BASE_DIR}")
+    print(f"Knowledge base: {KB_DIR}")
+    print(f"Data directory: {DATA_DIR}")
+
+    uvicorn.run(app, host="0.0.0.0", port=8000, log_level="info")
