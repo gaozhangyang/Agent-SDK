@@ -4,7 +4,9 @@ export interface TruncationConfig {
 }
 /**
  * 从 AGENT.md 内容中解析截断配置
- * 查找类似 "maxOutputLength: 102400" 或 "max_output_length: 102400" 的配置
+ * 支持两种格式：
+ * 1. ```json 代码块中的 JSON 格式
+ * 2. 直接写的格式（向后兼容）
  */
 export declare function parseTruncationConfig(agentMdContent?: string): TruncationConfig;
 export interface Primitives {

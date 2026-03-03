@@ -105,7 +105,39 @@ review   → plan       # 目标变化或需重新规划
 |--------|------|--------|
 | maxOutputLength | Terminal Log 输出截断长度（字节） | 102400 (100KB) |
 
-配置示例：
+配置示例（```json 格式）：
+
+```json
+{
+  "maxOutputLength": 204800,
+  "strategies": {
+    "level": "L1",
+    "mode_fsm": "enabled",
+    "permission_fsm": "enabled",
+    "harness": "standard",
+    "error_classifier": "enabled",
+    "judge": {
+      "outcome": "required",
+      "risk": "enabled",
+      "milestone": "enabled",
+      "capability": "enabled",
+      "selection": "disabled"
+    }
+  }
+}
 ```
-maxOutputLength: 204800  # 200KB
-```
+
+### 策略层配置说明
+
+| 策略项 | 说明 | 可选值 |
+|--------|------|--------|
+| level | 基础策略包，决定默认启用范围 | L0, L1, L2, L3 |
+| mode_fsm | Mode 状态机（Plan/Execute/Review/Recovery/Paused） | enabled, disabled |
+| permission_fsm | 权限状态机（Level 0-4） | enabled, disabled |
+| harness | 快照策略 | standard, aggressive, disabled |
+| error_classifier | 错误分类（retryable / logic / environment / budget） | enabled, disabled |
+| judge.outcome | Loop 终止收敛（不可关闭，可降级为 rule_based） | required, rule_based, disabled |
+| judge.risk | 高权限操作门卫 | enabled, disabled |
+| judge.milestone | git commit 时机判断 | enabled, disabled |
+| judge.capability | 启动时能力边界声明 | enabled, disabled |
+| judge.selection | 多候选仲裁 | enabled, disabled |

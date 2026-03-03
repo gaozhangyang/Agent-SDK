@@ -18,7 +18,9 @@ export interface TruncationConfig {
 
 /**
  * 从 AGENT.md 内容中解析截断配置
- * 查找类似 "maxOutputLength: 102400" 或 "max_output_length: 102400" 的配置
+ * 支持两种格式：
+ * 1. ```json 代码块中的 JSON 格式
+ * 2. 直接写的格式（向后兼容）
  */
 export function parseTruncationConfig(agentMdContent?: string): TruncationConfig {
   const defaultConfig: TruncationConfig = {
@@ -29,7 +31,20 @@ export function parseTruncationConfig(agentMdContent?: string): TruncationConfig
     return defaultConfig;
   }
   
-  // 尝试匹配多种配置格式
+  // 优先尝试解析 ```json 代码块
+  const jsonBlockMatch = agentMdContent.match(/```json\s*([\s\S]*?)\s*```/);
+  if (jsonBlockMatch) {
+    try {
+      const parsed = JSON.parse(jsonBlockMatch[1]);
+      if (parsed.maxOutputLength && typeof parsed.maxOutputLength === 'number') {
+        return { maxOutputLength: parsed.maxOutputLength };
+      }
+    } catch (e) {
+      console.warn('Failed to parse JSON config block, falling back to regex parsing:', e);
+    }
+  }
+  
+  // 尝试匹配多种配置格式（向后兼容）
   // 1. maxOutputLength: 102400
   // 2. max_output_length: 102400
   // 3. output_truncation: 102400

@@ -495,10 +495,10 @@ class TerminalLog {
         mdContent += `| input | ${messagePreview} |\n`;
         // 如果消息需要 <details> 块
         if (this.needsDetailsBlock(message)) {
-            mdContent += '\n<details><summary>完整内容</summary>\n';
-            mdContent += '```\n';
+            mdContent += '\n<details><summary>完整内容</summary>\n\n';
+            mdContent += '````\n';
             mdContent += message + '\n';
-            mdContent += '```\n';
+            mdContent += '````\n\n';
             mdContent += '</details>\n';
             mdContent += '\n';
         }

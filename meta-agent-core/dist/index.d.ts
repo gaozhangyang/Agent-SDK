@@ -43,6 +43,9 @@ export interface AgentStrategiesConfig {
 }
 /**
  * 从 AGENT.md 内容中解析策略层配置
+ * 支持两种格式：
+ * 1. ```json 代码块中的 JSON 格式
+ * 2. YAML 格式（向后兼容）
  */
 export declare function parseStrategiesConfig(agentMdContent?: string): AgentStrategiesConfig;
 export interface MetaAgent {

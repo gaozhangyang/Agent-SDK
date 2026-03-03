@@ -343,40 +343,48 @@ git 管理严格限制在项目源代码目录，排除 `.agent/`。
 
 Session 启动时自动读取 `{workDir}/.agent/AGENT.md`（根据 change.md 修改，AGENT.md 已移至 .agent/ 目录），注入每次 LLM 调用的 system prompt，提交到 git，团队共享。
 
-AGENT.md 运行时配置项：
+**AGENT.md 运行时配置格式：**
+
+根据 change.md 要求，所有运行时配置均写在 md 文件里的 ```json 代码块中：
+
+```json
+{
+  "maxOutputLength": 204800,
+  "strategies": {
+    "level": "L1",
+    "mode_fsm": "enabled",
+    "permission_fsm": "enabled",
+    "harness": "standard",
+    "error_classifier": "enabled",
+    "judge": {
+      "outcome": "required",
+      "risk": "enabled",
+      "milestone": "enabled",
+      "capability": "enabled",
+      "selection": "disabled"
+    }
+  }
+}
+```
 
 | 配置项 | 说明 | 默认值 |
 |--------|------|--------|
 | maxOutputLength | Terminal Log 输出截断长度（字节） | 102400 (100KB) |
-
-**策略层配置（strategies）：**
-
-AGENT.md 支持策略层配置，SDK 读取后动态组装 Hooks：
-
-```yaml
-# AGENT.md — 策略层配置
-strategies:
-  level: L1                      # 基础策略包，决定默认启用范围
-
-  mode_fsm: enabled              # Mode 状态机（Plan/Execute/Review/Recovery/Paused）
-  permission_fsm: enabled        # 权限状态机（Level 0-4）
-
-  harness: standard              # 快照策略：standard | aggressive | disabled
-
-  error_classifier: enabled      # 错误分类（retryable / logic / environment / budget）
-
-  judge:
-    outcome:    required         # Loop 终止收敛，不可关闭（可降级为 rule_based）
-    risk:       enabled          # 高权限操作门卫
-    milestone:  enabled          # git commit 时机
-    capability: enabled          # 启动时能力边界声明
-    selection:  disabled         # 多候选仲裁，单候选场景不需要
-```
+| strategies.level | 基础策略包，决定默认启用范围 | L1 |
+| strategies.mode_fsm | Mode 状态机（Plan/Execute/Review/Recovery/Paused） | enabled |
+| strategies.permission_fsm | 权限状态机（Level 0-4） | enabled |
+| strategies.harness | 快照策略 | standard |
+| strategies.error_classifier | 错误分类（retryable / logic / environment / budget） | enabled |
+| strategies.judge.outcome | Loop 终止收敛（不可关闭，可降级为 rule_based） | required |
+| strategies.judge.risk | 高权限操作门卫 | enabled |
+| strategies.judge.milestone | git commit 时机 | enabled |
+| strategies.judge.capability | 启动时能力边界声明 | enabled |
+| strategies.judge.selection | 多候选仲裁 | disabled |
 
 说明：
 - `judge.outcome` 是唯一不建议 `disabled` 的项，降级选项是 `rule_based`（规则匹配替代 LLMCall）
 - `level: L0` 时所有策略项默认 `disabled`，仅运行核心层 + 编排层骨架
-- 此字段提交到 git，团队共享，与现有 `maxOutputLength` 并列
+- SDK 解析配置时优先使用 ```json 代码块中的内容，同时向后兼容 YAML 格式
 
 ---
 

@@ -86,6 +86,48 @@ Survey Agent 支持跨 HTTP 请求的 Session 恢复：
 }
 ```
 
+### AGENT.md 运行时配置
+
+Survey Agent 支持通过 `AGENT.md` 文件进行运行时配置。配置内容写在 md 文件里的 ```json 代码块中：
+
+```json
+{
+  "maxOutputLength": 204800,
+  "strategies": {
+    "level": "L1",
+    "mode_fsm": "enabled",
+    "permission_fsm": "enabled",
+    "harness": "standard",
+    "error_classifier": "enabled",
+    "judge": {
+      "outcome": "required",
+      "risk": "enabled",
+      "milestone": "enabled",
+      "capability": "enabled",
+      "selection": "disabled"
+    }
+  }
+}
+```
+
+**配置项说明：**
+
+| 配置项 | 说明 | 默认值 |
+|--------|------|--------|
+| maxOutputLength | Terminal Log 输出截断长度（字节） | 102400 (100KB) |
+| strategies.level | 基础策略包 | L1 |
+| strategies.mode_fsm | Mode 状态机 | enabled |
+| strategies.permission_fsm | 权限状态机 | enabled |
+| strategies.harness | 快照策略 | standard |
+| strategies.error_classifier | 错误分类 | enabled |
+| strategies.judge.outcome | Loop 终止收敛 | required |
+| strategies.judge.risk | 高权限操作门卫 | enabled |
+| strategies.judge.milestone | git commit 时机 | enabled |
+| strategies.judge.capability | 能力边界声明 | enabled |
+| strategies.judge.selection | 多候选仲裁 | disabled |
+
+SDK 服务器会自动加载 `.agent/AGENT.md` 文件作为静态上下文，并解析其中的配置。
+
 系统已完整实现设计文档中的所有功能，包括：
 - ✅ 知识板块管理
 - ✅ 论文抓取、筛选、分析流水线

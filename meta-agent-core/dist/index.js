@@ -39,6 +39,9 @@ const error_classifier_1 = require("./hooks/error-classifier");
 Object.defineProperty(exports, "createErrorClassifier", { enumerable: true, get: function () { return error_classifier_1.createErrorClassifier; } });
 /**
  * 从 AGENT.md 内容中解析策略层配置
+ * 支持两种格式：
+ * 1. ```json 代码块中的 JSON 格式
+ * 2. YAML 格式（向后兼容）
  */
 function parseStrategiesConfig(agentMdContent) {
     const defaultConfig = {
@@ -58,7 +61,33 @@ function parseStrategiesConfig(agentMdContent) {
     if (!agentMdContent) {
         return defaultConfig;
     }
-    // 解析 strategies 配置块
+    // 优先尝试解析 ```json 代码块
+    const jsonBlockMatch = agentMdContent.match(/```json\s*([\s\S]*?)\s*```/);
+    if (jsonBlockMatch) {
+        try {
+            const parsed = JSON.parse(jsonBlockMatch[1]);
+            // 合并配置
+            const config = { ...defaultConfig };
+            if (parsed.level)
+                config.level = parsed.level;
+            if (parsed.mode_fsm)
+                config.mode_fsm = parsed.mode_fsm;
+            if (parsed.permission_fsm)
+                config.permission_fsm = parsed.permission_fsm;
+            if (parsed.harness)
+                config.harness = parsed.harness;
+            if (parsed.error_classifier)
+                config.error_classifier = parsed.error_classifier;
+            if (parsed.judge) {
+                config.judge = { ...defaultConfig.judge, ...parsed.judge };
+            }
+            return config;
+        }
+        catch (e) {
+            console.warn('Failed to parse JSON config block, falling back to YAML parsing:', e);
+        }
+    }
+    // 解析 strategies 配置块（YAML 格式，向后兼容）
     const strategiesMatch = agentMdContent.match(/strategies:\s*([\s\S]*?)(?=\n\S|\n$|$)/i);
     if (!strategiesMatch) {
         return defaultConfig;
