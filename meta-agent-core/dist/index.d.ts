@@ -47,6 +47,23 @@ export interface AgentStrategiesConfig {
  * 2. YAML 格式（向后兼容）
  */
 export declare function parseStrategiesConfig(agentMdContent?: string): AgentStrategiesConfig;
+/**
+ * AGENT.md 中定义的运行时阈值配置
+ * 用于控制 Agent 循环的行为边界
+ */
+export interface AgentThresholdsConfig {
+    confidenceLow?: number;
+    confidenceMid?: number;
+    uncertaintyHigh?: number;
+    maxCollectRetry?: number;
+    maxNoProgress?: number;
+    maxIterations?: number;
+}
+/**
+ * 从 AGENT.md 内容中解析阈值配置
+ * 支持从 ```json 代码块中解析 thresholds 字段
+ */
+export declare function parseThresholdsConfig(agentMdContent?: string): AgentThresholdsConfig | undefined;
 export interface MetaAgent {
     run(loopConfig?: Partial<LoopConfig>): Promise<LoopResult>;
     interrupt(message: string): void;

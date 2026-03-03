@@ -7,6 +7,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.createErrorClassifier = exports.createPermissionHooks = exports.createModeHooks = exports.InterruptChannel = exports.StateManager = exports.createInitialState = exports.canTransition = exports.runLoop = exports.Harness = exports.Memory = exports.GlobalSeqManager = exports.TerminalLog = exports.Trace = exports.collect = exports.LLMCall = void 0;
 exports.parseStrategiesConfig = parseStrategiesConfig;
+exports.parseThresholdsConfig = parseThresholdsConfig;
 exports.createMetaAgent = createMetaAgent;
 const path_1 = __importDefault(require("path"));
 const promises_1 = __importDefault(require("fs/promises"));
@@ -150,6 +151,51 @@ function parseStrategiesConfig(agentMdContent) {
         config.judge = defaultJudge;
     }
     return config;
+}
+/**
+ * 从 AGENT.md 内容中解析阈值配置
+ * 支持从 ```json 代码块中解析 thresholds 字段
+ */
+function parseThresholdsConfig(agentMdContent) {
+    if (!agentMdContent) {
+        return undefined;
+    }
+    // 尝试解析 ```json 代码块
+    const jsonBlockMatch = agentMdContent.match(/```json\s*([\s\S]*?)\s*```/);
+    if (!jsonBlockMatch) {
+        return undefined;
+    }
+    try {
+        const parsed = JSON.parse(jsonBlockMatch[1]);
+        if (parsed.thresholds && typeof parsed.thresholds === 'object') {
+            const thresholds = {};
+            if (typeof parsed.thresholds.confidenceLow === 'number') {
+                thresholds.confidenceLow = parsed.thresholds.confidenceLow;
+            }
+            if (typeof parsed.thresholds.confidenceMid === 'number') {
+                thresholds.confidenceMid = parsed.thresholds.confidenceMid;
+            }
+            if (typeof parsed.thresholds.uncertaintyHigh === 'number') {
+                thresholds.uncertaintyHigh = parsed.thresholds.uncertaintyHigh;
+            }
+            if (typeof parsed.thresholds.maxCollectRetry === 'number') {
+                thresholds.maxCollectRetry = parsed.thresholds.maxCollectRetry;
+            }
+            if (typeof parsed.thresholds.maxNoProgress === 'number') {
+                thresholds.maxNoProgress = parsed.thresholds.maxNoProgress;
+            }
+            if (typeof parsed.thresholds.maxIterations === 'number') {
+                thresholds.maxIterations = parsed.thresholds.maxIterations;
+            }
+            // 返回非空对象
+            return Object.keys(thresholds).length > 0 ? thresholds : undefined;
+        }
+        return undefined;
+    }
+    catch (e) {
+        console.warn('Failed to parse thresholds config from AGENT.md:', e);
+        return undefined;
+    }
 }
 async function createMetaAgent(projectPath, goal, llmProvider, options) {
     // 1. 创建 .agent/ 目录

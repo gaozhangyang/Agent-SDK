@@ -160,6 +160,16 @@ def run_agent(
     sdk_url = config.get("sdk_url", "http://127.0.0.1:3890")
     llm_config = config.get("llm", {})
 
+    # 从配置中获取 thresholds（如果存在）
+    thresholds_config = config.get("thresholds", {})
+
+    # 如果配置中没有 thresholds，使用默认值
+    if not thresholds_config:
+        thresholds_config = {
+            "maxIterations": 100,
+            "maxNoProgress": 10,
+        }
+
     # 构造请求 payload
     payload = {
         "goal": goal,
@@ -169,10 +179,7 @@ def run_agent(
             "maxTokens": 8000,
         },
         "llm": llm_config,
-        "thresholds": {
-            "maxIterations": 100,
-            "maxNoProgress": 10,
-        },
+        "thresholds": thresholds_config,
         "debug": args.debug or config.get("debug", False),
         "resume": False,  # 每次运行都使用新的 goal
     }

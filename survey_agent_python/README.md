@@ -130,6 +130,28 @@ python run.py
 }
 ```
 
+修改阈值配置（控制 Agent 循环的行为边界）：
+
+```json
+{
+  "thresholds": {
+    "uncertaintyHigh": 0.85,
+    "maxNoProgress": 10,
+    "maxIterations": 100
+  }
+}
+```
+
+| 阈值项 | 说明 | 默认值 |
+|--------|------|--------|
+| confidenceLow | 置信度低阈值，低于此值将触发Escalate | 0.3 |
+| confidenceMid | 置信度中阈值 | 0.6 |
+| uncertaintyHigh | 不确定性高阈值，超过此值将触发Escalate | 0.7 |
+| maxCollectRetry | 最大收集重试次数 | 3 |
+| maxNoProgress | 最大无进展次数，超过此值将触发Escalate | 3 |
+| maxIterations | 最大迭代次数，超过此值任务终止 | 50 |
+```
+
 ## 定制 Survey Agent
 
 ### 修改 Workflow

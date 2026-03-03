@@ -195,9 +195,14 @@ app.post('/run', async (req, res) => {
         }
         // 获取当前收集配置（用于恢复的 agent）
         const currentCollectConfig = agentConfigCache.get(cacheKey)?.collectConfig || collectConfig;
+        // 从 AGENT.md 解析阈值配置
+        const agentMdContent = agentConfigCache.get(cacheKey)?.agentMdContent;
+        const agentThresholds = (0, index_1.parseThresholdsConfig)(agentMdContent);
+        // 合并阈值配置：请求中的阈值优先级高于 AGENT.md 中的阈值
+        const mergedThresholds = { ...agentThresholds, ...thresholds };
         const result = await agent.run({
             collectConfig: currentCollectConfig,
-            thresholds,
+            thresholds: mergedThresholds,
             onEscalate: async (reason) => {
                 // 仅记录，不阻断返回
                 const trace = agent.getTrace();

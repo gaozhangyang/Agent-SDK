@@ -188,6 +188,14 @@ review   → plan       # 目标变化或需重新规划
     }
   ],
   "maxOutputLength": 64000,
+  "thresholds": {
+    "confidenceLow": 0.3,
+    "confidenceMid": 0.6,
+    "uncertaintyHigh": 0.85,
+    "maxCollectRetry": 3,
+    "maxNoProgress": 10,
+    "maxIterations": 100
+  },
   "strategies": {
     "level": "L1",
     "permissions": 3,
@@ -205,6 +213,19 @@ review   → plan       # 目标变化或需重新规划
   }
 }
 ```
+
+### 阈值配置说明
+
+| 阈值项 | 说明 | 默认值 |
+|--------|------|--------|
+| confidenceLow | 置信度低阈值，低于此值将触发Escalate | 0.3 |
+| confidenceMid | 置信度中阈值 | 0.6 |
+| uncertaintyHigh | 不确定性高阈值，超过此值将触发Escalate | 0.7 |
+| maxCollectRetry | 最大收集重试次数 | 3 |
+| maxNoProgress | 最大无进展次数，超过此值将触发Escalate | 3 |
+| maxIterations | 最大迭代次数，超过此值任务终止 | 50 |
+
+> **注意**：thresholds 配置可从 AGENT.md 中读取，也可通过 HTTP 请求覆盖。请求中的阈值优先级高于 AGENT.md 中的配置。
 
 ### 策略层配置说明
 

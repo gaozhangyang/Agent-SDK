@@ -180,6 +180,70 @@ export function parseStrategiesConfig(agentMdContent?: string): AgentStrategiesC
   return config;
 }
 
+// ── Thresholds 配置 ─────────────────────────────────────────────────
+
+/**
+ * AGENT.md 中定义的运行时阈值配置
+ * 用于控制 Agent 循环的行为边界
+ */
+export interface AgentThresholdsConfig {
+  confidenceLow?: number;      // 置信度低阈值（默认 0.3）
+  confidenceMid?: number;     // 置信度中阈值（默认 0.6）
+  uncertaintyHigh?: number;    // 不确定性高阈值（默认 0.7）
+  maxCollectRetry?: number;   // 最大收集重试次数（默认 3）
+  maxNoProgress?: number;      // 最大无进展次数（默认 3）
+  maxIterations?: number;      // 最大迭代次数（默认 50）
+}
+
+/**
+ * 从 AGENT.md 内容中解析阈值配置
+ * 支持从 ```json 代码块中解析 thresholds 字段
+ */
+export function parseThresholdsConfig(agentMdContent?: string): AgentThresholdsConfig | undefined {
+  if (!agentMdContent) {
+    return undefined;
+  }
+  
+  // 尝试解析 ```json 代码块
+  const jsonBlockMatch = agentMdContent.match(/```json\s*([\s\S]*?)\s*```/);
+  if (!jsonBlockMatch) {
+    return undefined;
+  }
+  
+  try {
+    const parsed = JSON.parse(jsonBlockMatch[1]);
+    if (parsed.thresholds && typeof parsed.thresholds === 'object') {
+      const thresholds: AgentThresholdsConfig = {};
+      
+      if (typeof parsed.thresholds.confidenceLow === 'number') {
+        thresholds.confidenceLow = parsed.thresholds.confidenceLow;
+      }
+      if (typeof parsed.thresholds.confidenceMid === 'number') {
+        thresholds.confidenceMid = parsed.thresholds.confidenceMid;
+      }
+      if (typeof parsed.thresholds.uncertaintyHigh === 'number') {
+        thresholds.uncertaintyHigh = parsed.thresholds.uncertaintyHigh;
+      }
+      if (typeof parsed.thresholds.maxCollectRetry === 'number') {
+        thresholds.maxCollectRetry = parsed.thresholds.maxCollectRetry;
+      }
+      if (typeof parsed.thresholds.maxNoProgress === 'number') {
+        thresholds.maxNoProgress = parsed.thresholds.maxNoProgress;
+      }
+      if (typeof parsed.thresholds.maxIterations === 'number') {
+        thresholds.maxIterations = parsed.thresholds.maxIterations;
+      }
+      
+      // 返回非空对象
+      return Object.keys(thresholds).length > 0 ? thresholds : undefined;
+    }
+    return undefined;
+  } catch (e) {
+    console.warn('Failed to parse thresholds config from AGENT.md:', e);
+    return undefined;
+  }
+}
+
 // ── createMetaAgent 工厂函数 ─────────────────────────────────────────────────
 
 export interface MetaAgent {
