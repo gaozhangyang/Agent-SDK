@@ -437,21 +437,29 @@ export class TerminalLog {
     
     // 规则4: 多行内容、含 Markdown 语法的内容放进 <details> 块
     // 注意：内层代码块使用四个反引号，避免与外层 Markdown 环境冲突
+    // 修改：使用两个独立的折叠块，分别显示 input 和 output
     if (hasFullContent) {
-      lines.push('');
-      lines.push('<details><summary>完整 input / output</summary>');
-      lines.push('');
+      // 分别检查 input 和 output 是否需要放进 details 块
+      const needsInputDetails = entry.input && needsDetailsBlock(entry.input);
+      const needsOutputDetails = entry.output && needsDetailsBlock(entry.output);
 
-      if (entry.input && needsDetailsBlock(entry.input)) {
+      if (needsInputDetails && entry.input) {
+        lines.push('');
+        lines.push('<details><summary>完整的input</summary>');
+        lines.push('');
         lines.push('### input');
         lines.push('');
         lines.push('````');
         lines.push(entry.input);
         lines.push('````');
         lines.push('');
+        lines.push('</details>');
       }
 
-      if (entry.output && needsDetailsBlock(entry.output)) {
+      if (needsOutputDetails) {
+        lines.push('');
+        lines.push('<details><summary>完整的output</summary>');
+        lines.push('');
         lines.push('### output');
         lines.push('');
         // 如果是模板内容，用 markdown 代码块包裹（避免 h1 标题污染层级）
@@ -465,11 +473,14 @@ export class TerminalLog {
           lines.push('````');
         }
         lines.push('');
+        lines.push('</details>');
       }
 
-      lines.push('</details>');
-      // 规则5: </details> 后必须有空行
-      lines.push('');
+      // 只有当 input 或 output 有内容时才添加空行
+      if (needsInputDetails || needsOutputDetails) {
+        // 规则5: </details> 后必须有空行
+        lines.push('');
+      }
     }
     
     return lines.join('\n');

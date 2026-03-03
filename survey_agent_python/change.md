@@ -1,1 +1,0 @@
-端到端测试run.py，联合测试meta-agent-core的状态是否符合预期, 建议survey_agent_python/.agent/terminal.md里面的 <details>模块<details>不应该包括'完整 input / output', 而是应该有两个折叠块，分别是‘完整的input’和'完整的output'。而且 AGENT.md里面的maxOutputLength参数，需要能控制terminal.md里面的展示字符数量。最后更新survey_agent_python/README.md和meta-agent-core/README.md，使得项目状态和描述一致
