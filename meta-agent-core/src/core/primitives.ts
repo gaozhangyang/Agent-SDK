@@ -70,7 +70,11 @@ export function parseTruncationConfig(agentMdContent?: string): TruncationConfig
 /**
  * 截断过长的输出，并在末尾标记
  */
-function truncateOutput(output: string, maxLength: number = DEFAULT_MAX_OUTPUT_LENGTH): { content: string; truncated: boolean } {
+function truncateOutput(output: string | undefined | null, maxLength: number = DEFAULT_MAX_OUTPUT_LENGTH): { content: string; truncated: boolean } {
+  // 防御性检查：处理 undefined 或 null
+  if (output == null) {
+    return { content: '', truncated: false };
+  }
   if (output.length > maxLength) {
     const truncatedSizeKB = Math.round(maxLength / 1024);
     return {

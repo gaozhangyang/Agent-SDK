@@ -157,7 +157,7 @@ review   → plan       # 目标变化或需重新规划
       "min_relevance_score": 0.5
     }
   ],
-  "maxOutputLength": 204800,
+  "maxOutputLength": 64000,
   "strategies": {
     "level": "L1",
     "permissions": 3,

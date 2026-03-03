@@ -16,7 +16,11 @@ const MAX_OUTPUT_LENGTH = 100 * 1024;
 /**
  * 截断过长的输出，并在末尾标记
  */
-function truncateOutput(output: string): { content: string; truncated: boolean } {
+function truncateOutput(output: string | undefined | null): { content: string; truncated: boolean } {
+  // 防御性检查：处理 undefined 或 null
+  if (output == null) {
+    return { content: '', truncated: false };
+  }
   if (output.length > MAX_OUTPUT_LENGTH) {
     return {
       content: output.slice(0, MAX_OUTPUT_LENGTH) + '\n\n[... output truncated, exceeded 100KB limit]',
