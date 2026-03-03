@@ -1,9 +1,10 @@
 // [核心层 / 原语] core/primitives.ts — 四个执行原语，接口永不修改
+// 修改：trace.jsonl 补齐 kind 字段、统一 seq
 
 import fs from 'fs/promises';
 import { exec } from 'child_process';
 import { promisify } from 'util';
-import type { TerminalLog, OperationType } from './trace';
+import type { TerminalLog, OperationType, Trace, TraceEntry } from './trace';
 
 const execAsync = promisify(exec);
 
@@ -76,11 +77,13 @@ export interface Primitives {
  * 创建本地原语实现
  * @param coreDir SDK 的 src/ 目录绝对路径，用于路径白名单保护
  * @param terminalLog TerminalLog 实例，用于所有操作自动记录
+ * @param trace Trace 实例，用于记录 trace.jsonl（补齐 kind 字段）
  * @param truncationConfig 截断配置（可选，默认从 AGENT.md 解析）
  */
 export function localPrimitives(
   coreDir: string, 
   terminalLog: TerminalLog,
+  trace?: Trace,
   truncationConfig?: TruncationConfig
 ): Primitives {
   // 使用传入的配置或默认值
@@ -100,7 +103,7 @@ export function localPrimitives(
     options?: { command?: string; exitCode?: number; durationMs?: number }
   ) => {
     const { content: truncatedOutput, truncated } = truncateOutput(output, maxOutputLength);
-    terminalLog.append({
+    const seq = terminalLog.append({
       ts: Date.now(),
       operation,
       input,
@@ -108,6 +111,31 @@ export function localPrimitives(
       ...options,
       truncated,
     });
+    
+    // 同时写入 Trace（补齐 kind 字段）
+    // 根据 change.md：原子操作统一补 kind 为 "exec"
+    if (trace) {
+      const operationMap: Record<OperationType, string> = {
+        'read': 'read',
+        'write': 'write',
+        'edit': 'edit',
+        'bash': 'bash',
+        'llmcall': 'llmcall',
+        'collect': 'collect',
+      };
+      
+      const traceEntry: Omit<TraceEntry, 'seq'> = {
+        ts: Date.now(),
+        kind: 'exec',  // 原子操作统一为 exec
+        data: { operation: operationMap[operation], input, output: truncatedOutput },
+        operation: operationMap[operation],  // 补齐 operation 字段
+        input,
+        output: truncatedOutput,
+        durationMs: options?.durationMs,
+        terminal_seq: seq,  // 关联 TerminalLog 序号
+      };
+      trace.append(traceEntry);
+    }
   };
 
   return {
@@ -116,7 +144,7 @@ export function localPrimitives(
       const content = await fs.readFile(path, 'utf-8');
       const durationMs = Date.now() - startTime;
       
-      // 记录到 TerminalLog
+      // 记录到 TerminalLog 和 Trace
       logOperation('read', path, content, { durationMs });
       
       return content;
@@ -131,7 +159,7 @@ export function localPrimitives(
       await fs.writeFile(path, content, 'utf-8');
       const durationMs = Date.now() - startTime;
       
-      // 记录到 TerminalLog
+      // 记录到 TerminalLog 和 Trace
       logOperation('write', path, `[written ${content.length} bytes]`, { durationMs });
     },
 
@@ -149,7 +177,7 @@ export function localPrimitives(
       await fs.writeFile(path, content.replace(old, next), 'utf-8');
       const durationMs = Date.now() - startTime;
       
-      // 记录到 TerminalLog
+      // 记录到 TerminalLog 和 Trace
       logOperation('edit', path, `[edited: replaced "${old.slice(0, 50)}..." with "${next.slice(0, 50)}..."]`, { durationMs });
     },
 
@@ -172,7 +200,7 @@ export function localPrimitives(
       const durationMs = Date.now() - startTime;
       const output = stdout + (stderr ? `\n[stderr]\n${stderr}` : '');
 
-      // 自动写入 TerminalLog
+      // 自动写入 TerminalLog 和 Trace
       logOperation('bash', command, output, { command, exitCode, durationMs });
 
       // 如果 exitCode 不为 0，抛出错误

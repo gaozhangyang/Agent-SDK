@@ -6,4 +6,6 @@ agent_chat_config.json
 .ruff_cache
 node_modules
 data
-.agent
+state.json
+trace.jsonl
+terminal.md

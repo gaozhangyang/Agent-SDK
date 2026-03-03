@@ -4,6 +4,22 @@ import fs from 'fs/promises';
 import path from 'path';
 
 /**
+ * SubgoalOutcome: 子目标的结果类型
+ * - completed: 成功完成
+ * - voided: 被 Recovery 回滚，此路不通
+ */
+export type SubgoalOutcome = 'completed' | 'voided';
+
+/**
+ * Subgoal: 子目标记录
+ */
+export type Subgoal = {
+  goal: string;
+  summary: string;
+  outcome: SubgoalOutcome;
+};
+
+/**
  * MemoryEntry：结构化记忆记录
  * 每条记录包含用户请求 + 解决结论，形成长期记忆
  */
@@ -11,8 +27,8 @@ export type MemoryEntry = {
   ts: number;
   userRequest: string;      // 用户原始请求
   solutionSummary: string;  // 解决方案总结
-  sessionId?: string;        // 可选的会话标识
-  archivedSubgoal?: string; // 对应的已归档子目标
+  sessionId?: string;       // 可选的会话标识
+  subgoals?: Subgoal[];    // v2 新增：子目标明细（包含走不通的路径）
 };
 
 /**
@@ -78,13 +94,16 @@ export class Memory {
   }
 
   /**
-   * 更新最后一条记忆的 solutionSummary
-   * 在任务完成时调用，记录总结回答
+   * 更新最后一条记忆的 solutionSummary 和 subgoals
+   * 在任务完成时调用，记录总结回答和子目标明细
    */
-  updateLastEntry(solutionSummary: string): void {
+  updateLastEntry(solutionSummary: string, subgoals?: Subgoal[]): void {
     if (this.entries.length === 0) return;
     const lastEntry = this.entries[this.entries.length - 1];
     lastEntry.solutionSummary = solutionSummary;
+    if (subgoals) {
+      lastEntry.subgoals = subgoals;
+    }
     // 重新写入整个文件（因为是追加写，需要更新最后一条）
     // 注意：这是一种简化实现，实际上应该只更新最后一条
     this.lastWritePromise = this.lastWritePromise.then(async () => {

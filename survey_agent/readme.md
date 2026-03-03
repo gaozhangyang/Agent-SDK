@@ -26,9 +26,10 @@ survey_agent/
 ├── frontend/
 │   └── index.html             # 前端展示页面
 └── .agent/                    # Agent 运行时状态（Session 恢复）
+    ├── AGENT.md                # 静态上下文（团队共享）
     ├── state.json              # State 快照
-    ├── trace.jsonl             # Trace 推理轨迹（跨 Session 累积）
-    ├── terminal.jsonl         # Terminal Log 执行日志（跨 Session 累积）
+    ├── trace.jsonl             # Trace 推理轨迹（JSON 格式，跨 Session 累积）
+    ├── terminal.md            # Terminal Log 执行日志（Markdown 格式，跨 Session 累积）
     └── memory.jsonl           # Memory 长期记忆（跨 Session 累积）
 ```
 
@@ -64,7 +65,7 @@ Survey Agent 支持跨 HTTP 请求的 Session 恢复：
 
 - **State 恢复**：每次运行结束后，State 会持久化到 `.agent/state.json`
 - **Trace 累积**：推理轨迹追加写到 `.agent/trace.jsonl`，跨 Session 累积
-- **Terminal Log 累积**：执行日志追加写到 `.agent/terminal.jsonl`，跨 Session 累积
+- **Terminal Log 累积**：执行日志追加写到 `.agent/terminal.md`（Markdown 格式），跨 Session 累积
 - **Memory 累积**：长期记忆追加写到 `.agent/memory.jsonl`，跨 Session 累积
 - **序列号连续**：Trace 和 Terminal Log 的 seq 序号跨请求连续递增
 

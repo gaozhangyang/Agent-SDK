@@ -38,7 +38,7 @@ class LLMCall {
     // Judge：收敛裁决，必须显式指定 type
     async judge(type, context, input) {
         // 非法 type 立即抛出错误
-        const validTypes = ['outcome', 'risk', 'selection', 'capability'];
+        const validTypes = ['outcome', 'risk', 'selection', 'milestone', 'capability'];
         if (!validTypes.includes(type)) {
             throw new Error(`judge: unknown type "${type}"`);
         }
@@ -46,6 +46,7 @@ class LLMCall {
             outcome: '判断子目标是否达成（是/否 + 理由）',
             risk: '判断操作是否允许执行，权限是否满足（通过/拒绝 + 理由）',
             selection: '从多个候选方案中选出最优（选项编号 + 理由）',
+            milestone: '判断当前完成点是否值得一个 git commit（是/否 + 理由）：判断标准：1. 当前完成点是否可以用一句话独立描述（功能完整性）；2. 回滚到此处是否有意义（可恢复性）；3. 与上次快照之间是否有实质变更',
             capability: '判断任务是否在 agent 能力和权限范围内（完全可行/部分可行/不可行 + 理由）',
         };
         const staticCtx = this.staticContext ? `\n\n## 静态上下文（AGENT.md）\n${this.staticContext}\n` : '';

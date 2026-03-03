@@ -144,12 +144,18 @@ type TraceEntry = {
   uncertainty?: Uncertainty;   // LLMCall 产出
   terminal_seq?: number;       // 关联的 Terminal Log 序号（exec 类型时填写）
   tags?: string[];
+  // 扩展字段：补齐 change.md 要求的字段
+  judge_type?: string;   // Judge 调用的类型：outcome, risk, selection, milestone, capability
+  operation?: string;   // 原子操作类型：read, write, edit, bash
+  input?: string;       // 输入内容
+  output?: string;      // 输出内容
+  durationMs?: number; // 耗时
 };
 
 // Terminal Log：终端——记录所有原子操作及其结果
 type TerminalEntry = {
   ts: number;
-  seq: number;
+  seq: number;                 // 全局序号，与 Trace.terminal_seq 对应
   operation: 'llmcall' | 'collect' | 'read' | 'write' | 'edit' | 'bash';
   input?: string;              // 输入内容（路径、prompt 等）
   output: string;              // 操作结果（超出 100KB 时截断并标记）
@@ -160,11 +166,21 @@ type TerminalEntry = {
 };
 ```
 
+**统一 seq 序号空间：** Trace 和 Terminal Log 共享同一个全局递增序号，由 Agent Core 统一分配，写入时同步。Trace 的 `exec` 类型条目携带 `terminal_seq` 指向对应 Terminal Log 条目，实现双向可达。
+
 两者均为追加写，跨 Session 累积，不清空。`narrative` 类型的 Trace 条目是人类可读的状态摘要，在 Mode 切换和 Milestone 完成时由轻量 LLMCall[Reason] 生成。
 
 **双格式日志：**
 - `trace.jsonl`：JSON 格式，用于程序解析
-- `terminal.log`：Shell 友好格式，用于人类阅读。格式为 `[时间] [角色] >/< 内容`，角色为 `USER` 或 `AGENT`
+- `terminal.md`：Markdown 格式，用于人类阅读。支持路径别名、操作图标（📖 read · ✏️ write · 🔧 edit · 💻 bash · 🔍 collect · 🤖 llmcall）、折叠块、截断引用等功能。
+
+  **Markdown 渲染规则：**
+
+  1. 表格前后必须有空行
+  2. 表格必须有分隔符行（`|---|---|`）
+  3. 表格单元格只放单行纯文本，截断用省略号
+  4. 多行内容、含 Markdown 语法的内容全部放进 `<details>` 块
+  5. `</details>` 后必须有空行，再写下一个 `##` 标题
 
 **输出截断：** 超过阈值时自动截断并标记。默认阈值 100KB，可通过 AGENT.md 的 `maxOutputLength` 配置（单位：字节）。
 
@@ -175,12 +191,12 @@ type TerminalEntry = {
 ```
 /projects/{project-id}/
 ├── .agent/
-│   ├── state.json          # 上次运行结束时的 State 快照（Session 恢复入口）
-│   ├── trace.jsonl         # 累积推理轨迹（追加写，跨 Session）
-│   ├── terminal.log        # 累积终端日志（追加写，跨 Session，Shell 格式）
-│   ├── memory.jsonl        # 长期记忆（追加写，跨 Session）
-│   └── sessions/           # 每次运行的摘要索引（便于历史检索）
-├── AGENT.md                # 静态上下文（提交到 git，团队共享）
+│   ├── AGENT.md              # 静态上下文（从根目录移入）
+│   ├── state.json            # 上次运行结束时的 State 快照（Session 恢复入口）
+│   ├── trace.jsonl           # 累积推理轨迹（追加写，跨 Session）
+│   ├── terminal.md           # 累积终端日志（追加写，跨 Session，Markdown 格式）
+│   ├── memory.jsonl          # 长期记忆（追加写，跨 Session）
+│   └── sessions/             # 每次运行的摘要索引（便于历史检索）
 └── [项目源代码]
 ```
 
@@ -194,8 +210,28 @@ type TerminalEntry = {
 
 ### 核心层 5：Memory 长期记忆
 
+> Memory 与 State 的分工：State 记录"现在"（当前任务的实时快照，随迭代覆写），Memory 记录"历史"（跨任务的档案，只增不改）。当前任务内已完成的子目标存入 `State.archivedSubgoals`，供当前任务后续步骤参考；任务终止时，将完整的子目标列表随任务总结一并写入 Memory，供未来任务检索。两者不合并，原因是生命周期不同（快照 vs 档案）、读写模式不同（整体加载 vs 按需检索）、增长方式不同（有界 vs 无界）。
+
 ```
-MemoryEntry = { ts, userRequest, solutionSummary, sessionId?, archivedSubgoal? }
+type SubgoalOutcome = 'completed' | 'voided';
+
+type Subgoal = {
+  goal: string;
+  summary: string;
+  outcome: SubgoalOutcome;
+};
+
+MemoryEntry = {
+  ts: number;
+  sessionId?: string;
+  userRequest: string;           // 用户原始请求
+  solutionSummary: string;       // 任务整体总结
+  subgoals: Array<{             // 子目标明细
+    goal: string;
+    summary: string;
+    outcome: SubgoalOutcome;
+  }>
+}
 ```
 
 专门存储"用户请求 + 解决结论"的结构化记录，与 Trace 分开维护：
@@ -272,11 +308,19 @@ coverage 低，reliability 低  → 直接 Escalate
 State 是 KV 容器，不内置业务逻辑：
 
 ```typescript
+type SubgoalOutcome = 'completed' | 'voided';
+
+type ArchivedSubgoal = {
+  goal: string;
+  summary: string;           // 该子目标的解决结论
+  outcome: SubgoalOutcome;  // voided = 被 Recovery 回滚，此路不通
+};
+
 type AgentState = {
   goal: string;
   subgoals: string[];
   currentSubgoal: string | null;
-  archivedSubgoals: string[];     // 已完成子目标，不再进入 active context
+  archivedSubgoals: ArchivedSubgoal[];  // 已完成子目标，包含结论和结果
   mode: Mode;
   permissions: PermissionLevel;
   iterationCount: number;
@@ -297,13 +341,42 @@ git 管理严格限制在项目源代码目录，排除 `.agent/`。
 
 ### 静态上下文注入（AGENT.md）
 
-Session 启动时自动读取 `{workDir}/AGENT.md`，注入每次 LLM 调用的 system prompt，提交到 git，团队共享。
+Session 启动时自动读取 `{workDir}/.agent/AGENT.md`（根据 change.md 修改，AGENT.md 已移至 .agent/ 目录），注入每次 LLM 调用的 system prompt，提交到 git，团队共享。
 
 AGENT.md 运行时配置项：
 
 | 配置项 | 说明 | 默认值 |
 |--------|------|--------|
 | maxOutputLength | Terminal Log 输出截断长度（字节） | 102400 (100KB) |
+
+**策略层配置（strategies）：**
+
+AGENT.md 支持策略层配置，SDK 读取后动态组装 Hooks：
+
+```yaml
+# AGENT.md — 策略层配置
+strategies:
+  level: L1                      # 基础策略包，决定默认启用范围
+
+  mode_fsm: enabled              # Mode 状态机（Plan/Execute/Review/Recovery/Paused）
+  permission_fsm: enabled        # 权限状态机（Level 0-4）
+
+  harness: standard              # 快照策略：standard | aggressive | disabled
+
+  error_classifier: enabled      # 错误分类（retryable / logic / environment / budget）
+
+  judge:
+    outcome:    required         # Loop 终止收敛，不可关闭（可降级为 rule_based）
+    risk:       enabled          # 高权限操作门卫
+    milestone:  enabled          # git commit 时机
+    capability: enabled          # 启动时能力边界声明
+    selection:  disabled         # 多候选仲裁，单候选场景不需要
+```
+
+说明：
+- `judge.outcome` 是唯一不建议 `disabled` 的项，降级选项是 `rule_based`（规则匹配替代 LLMCall）
+- `level: L0` 时所有策略项默认 `disabled`，仅运行核心层 + 编排层骨架
+- 此字段提交到 git，团队共享，与现有 `maxOutputLength` 并列
 
 ---
 

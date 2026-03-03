@@ -1,4 +1,18 @@
 /**
+ * SubgoalOutcome: 子目标的结果类型
+ * - completed: 成功完成
+ * - voided: 被 Recovery 回滚，此路不通
+ */
+export type SubgoalOutcome = 'completed' | 'voided';
+/**
+ * Subgoal: 子目标记录
+ */
+export type Subgoal = {
+    goal: string;
+    summary: string;
+    outcome: SubgoalOutcome;
+};
+/**
  * MemoryEntry：结构化记忆记录
  * 每条记录包含用户请求 + 解决结论，形成长期记忆
  */
@@ -7,7 +21,7 @@ export type MemoryEntry = {
     userRequest: string;
     solutionSummary: string;
     sessionId?: string;
-    archivedSubgoal?: string;
+    subgoals?: Subgoal[];
 };
 /**
  * Memory：长期记忆存储
@@ -26,9 +40,14 @@ export declare class Memory {
     private appendToFile;
     /**
      * 追加一条记忆记录
-     * 在子目标真正完成后，由 Loop 统一调用
+     * 在任务开始时调用，记录用户请求
      */
     append(entry: Omit<MemoryEntry, 'ts'>): void;
+    /**
+     * 更新最后一条记忆的 solutionSummary 和 subgoals
+     * 在任务完成时调用，记录总结回答和子目标明细
+     */
+    updateLastEntry(solutionSummary: string, subgoals?: Subgoal[]): void;
     /**
      * 等待所有待处理的写入完成
      */

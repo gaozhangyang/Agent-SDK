@@ -1,214 +1,179 @@
 [
   {
-    "arxiv_id": "2602.24290",
-    "title": "UFO-4D: Unposed Feedforward 4D Reconstruction from Two Images",
-    "abstract": "Dense 4D reconstruction from unposed images remains a critical challenge, with current methods relying on slow test-time optimization or fragmented, task-specific feedforward models. We introduce UFO-4D, a unified feedforward framework to reconstruct a dense, explicit 4D representation from just a pair of unposed images. UFO-4D directly estimates dynamic 3D Gaussian Splats, enabling the joint and consistent estimation of 3D geometry, 3D motion, and camera pose in a feedforward manner. Our core insight is that differentiably rendering multiple signals from a single Dynamic 3D Gaussian representation offers major training advantages. This approach enables a self-supervised image synthesis loss while tightly coupling appearance, depth, and motion. Since all modalities share the same geometric primitives, supervising one inherently regularizes and improves the others. This synergy overcomes data scarcity, allowing UFO-4D to outperform prior work by up to 3 times in joint geometry, motion, and camera pose estimation. Our representation also enables high-fidelity 4D interpolation across novel views and time. Please visit our project page for visual results: https://ufo-4d.github.io/",
+    "arxiv_id": "2603.01750",
+    "title": "Practical Deep Heteroskedastic Regression",
+    "abstract": "Uncertainty quantification (UQ) in deep learning regression is of wide interest, as it supports critical applications including sequential decision making and risk-sensitive tasks. In heteroskedastic regression, where the uncertainty of the target depends on the input, a common approach is to train a neural network that parameterizes the mean and the variance of the predictive distribution. Still, training deep heteroskedastic regression models poses practical challenges in the trade-off between uncertainty quantification and mean prediction, such as optimization difficulties, representation collapse, and variance overfitting. In this work we identify previously undiscussed fallacies and propose a simple and efficient procedure that addresses these challenges jointly by post-hoc fitting a variance model across the intermediate layers of a pretrained network on a hold-out dataset. We demonstrate that our method achieves on-par or state-of-the-art uncertainty quantification on several molecular graph datasets, without compromising mean prediction accuracy and remaining cheap to use at prediction time.",
     "authors": [
-      "Junhwa Hur",
-      "Charles Herrmann",
-      "Songyou Peng",
-      "Philipp Henzler",
-      "Zeyu Ma",
-      "Todd Zickler",
-      "Deqing Sun"
+      "Mikkel Jordahn",
+      "Jonas Vestergaard Jensen",
+      "James Harrison",
+      "Michael Riis Andersen",
+      "Mikkel N. Schmidt"
     ],
-    "submitted": "2026-02-27",
+    "submitted": "2026-03-02",
     "categories": [
-      "cs.CV"
+      "cs.LG"
     ],
-    "pdf_url": "https://arxiv.org/pdf/2602.24290",
-    "abs_url": "https://arxiv.org/abs/2602.24290"
+    "pdf_url": "https://arxiv.org/pdf/2603.01750",
+    "abs_url": "https://arxiv.org/abs/2603.01750"
   },
   {
-    "arxiv_id": "2602.24289",
-    "title": "Mode Seeking meets Mean Seeking for Fast Long Video Generation",
-    "abstract": "Scaling video generation from seconds to minutes faces a critical bottleneck: while short-video data is abundant and high-fidelity, coherent long-form data is scarce and limited to narrow domains. To address this, we propose a training paradigm where Mode Seeking meets Mean Seeking, decoupling local fidelity from long-term coherence based on a unified representation via a Decoupled Diffusion Transformer. Our approach utilizes a global Flow Matching head trained via supervised learning on long videos to capture narrative structure, while simultaneously employing a local Distribution Matching head that aligns sliding windows to a frozen short-video teacher via a mode-seeking reverse-KL divergence. This strategy enables the synthesis of minute-scale videos that learns long-range coherence and motions from limited long videos via supervised flow matching, while inheriting local realism by aligning every sliding-window segment of the student to a frozen short-video teacher, resulting in a few-step fast long video generator. Evaluations show that our method effectively closes the fidelity-horizon gap by jointly improving local sharpness, motion and long-range consistency. Project website: https://primecai.github.io/mmm/.",
+    "arxiv_id": "2603.01748",
+    "title": "Discrete World Models via Regularization",
+    "abstract": "World models aim to capture the states and dynamics of an environment in a compact latent space. Moreover, using Boolean state representations is particularly useful for search heuristics and symbolic reasoning and planning. Existing approaches keep latents informative via decoder-based reconstruction, or instead via contrastive or reward signals. In this work, we introduce Discrete World Models via Regularization (DWMR): a reconstruction-free and contrastive-free method for unsupervised Boolean world-model learning. In particular, we introduce a novel world-modeling loss that couples latent prediction with specialized regularizers. Such regularizers maximize the entropy and independence of the representation bits through variance, correlation, and coskewness penalties, while simultaneously enforcing a locality prior for sparse action changes. To enable effective optimization, we also introduce a novel training scheme improving robustness to discrete roll-outs. Experiments on two benchmarks with underlying combinatorial structure show that DWMR learns more accurate representations and transitions than reconstruction-based alternatives. Finally, DWMR can also be paired with an auxiliary reconstruction decoder, and this combination yields additional gains.",
     "authors": [
-      "Shengqu Cai",
-      "Weili Nie",
-      "Chao Liu",
-      "Julius Berner",
-      "Lvmin Zhang",
-      "Nanye Ma",
-      "Hansheng Chen",
-      "Maneesh Agrawala",
-      "Leonidas Guibas",
-      "Gordon Wetzstein",
-      "Arash Vahdat"
+      "Davide Bizzaro",
+      "Luciano Serafini"
     ],
-    "submitted": "2026-02-27",
+    "submitted": "2026-03-02",
+    "categories": [
+      "cs.LG",
+      "cs.AI"
+    ],
+    "pdf_url": "https://arxiv.org/pdf/2603.01748",
+    "abs_url": "https://arxiv.org/abs/2603.01748"
+  },
+  {
+    "arxiv_id": "2603.01746",
+    "title": "An Analysis of Multi-Task Architectures for the Hierarchic Multi-Label Problem of Vehicle Model and Make Classification",
+    "abstract": "Most information in our world is organized hierarchically; however, many Deep Learning approaches do not leverage this semantically rich structure. Research suggests that human learning benefits from exploiting the hierarchical structure of information, and intelligent models could similarly take advantage of this through multi-task learning. In this work, we analyze the advantages and limitations of multi-task learning in a hierarchical multi-label classification problem: car make and model classification. Considering both parallel and cascaded multi-task architectures, we evaluate their impact on different Deep Learning classifiers (CNNs, Transformers) while varying key factors such as dropout rate and loss weighting to gain deeper insight into the effectiveness of this approach. The tests are conducted on two established benchmarks: StanfordCars and CompCars. We observe the effectiveness of the multi-task paradigm on both datasets, improving the performance of the investigated CNN in almost all scenarios. Furthermore, the approach yields significant improvements on the CompCars dataset for both types of models.",
+    "authors": [
+      "Alexandru Manole",
+      "Laura Diosan"
+    ],
+    "submitted": "2026-03-02",
     "categories": [
       "cs.CV",
-      "cs.LG"
-    ],
-    "pdf_url": "https://arxiv.org/pdf/2602.24289",
-    "abs_url": "https://arxiv.org/abs/2602.24289"
-  },
-  {
-    "arxiv_id": "2602.24288",
-    "title": "DARE-bench: Evaluating Modeling and Instruction Fidelity of LLMs in Data Science",
-    "abstract": "The fast-growing demands in using Large Language Models (LLMs) to tackle complex multi-step data science tasks create an emergent need for accurate benchmarking. There are two major gaps in existing benchmarks: (i) the lack of standardized, process-aware evaluation that captures instruction adherence and process fidelity, and (ii) the scarcity of accurately labeled training data. To bridge these gaps, we introduce DARE-bench, a benchmark designed for machine learning modeling and data science instruction following. Unlike many existing benchmarks that rely on human- or model-based judges, all tasks in DARE-bench have verifiable ground truth, ensuring objective and reproducible evaluation. To cover a broad range of tasks and support agentic tools, DARE-bench consists of 6,300 Kaggle-derived tasks and provides both large-scale training data and evaluation sets. Extensive evaluations show that even highly capable models such as gpt-o4-mini struggle to achieve good performance, especially in machine learning modeling tasks. Using DARE-bench training tasks for fine-tuning can substantially improve model performance. For example, supervised fine-tuning boosts Qwen3-32B's accuracy by 1.83x and reinforcement learning boosts Qwen3-4B's accuracy by more than 8x. These significant improvements verify the importance of DARE-bench both as an accurate evaluation benchmark and critical training data.",
-    "authors": [
-      "Fan Shu",
-      "Yite Wang",
-      "Ruofan Wu",
-      "Boyi Liu",
-      "Zhewei Yao",
-      "Yuxiong He",
-      "Feng Yan"
-    ],
-    "submitted": "2026-02-27",
-    "categories": [
-      "cs.AI",
-      "cs.CL"
-    ],
-    "pdf_url": "https://arxiv.org/pdf/2602.24288",
-    "abs_url": "https://arxiv.org/abs/2602.24288"
-  },
-  {
-    "arxiv_id": "2602.24287",
-    "title": "Do LLMs Benefit From Their Own Words?",
-    "abstract": "Multi-turn interactions with large language models typically retain the assistant's own past responses in the conversation history. In this work, we revisit this design choice by asking whether large language models benefit from conditioning on their own prior responses. Using in-the-wild, multi-turn conversations, we compare standard (full-context) prompting with a user-turn-only prompting approach that omits all previous assistant responses, across three open reasoning models and one state-of-the-art model. To our surprise, we find that removing prior assistant responses does not affect response quality on a large fraction of turns. Omitting assistant-side history can reduce cumulative context lengths by up to 10x. To explain this result, we find that multi-turn conversations consist of a substantial proportion (36.4%) of self-contained prompts, and that many follow-up prompts provide sufficient instruction to be answered using only the current user turn and prior user turns. When analyzing cases where user-turn-only prompting substantially outperforms full context, we identify instances of context pollution, in which models over-condition on their previous responses, introducing errors, hallucinations, or stylistic artifacts that propagate across turns. Motivated by these findings, we design a context-filtering approach that selectively omits assistant-side context. Our findings suggest that selectively omitting assistant history can improve response quality while reducing memory consumption.",
-    "authors": [
-      "Jenny Y. Huang",
-      "Leshem Choshen",
-      "Ramon Astudillo",
-      "Tamara Broderick",
-      "Jacob Andreas"
-    ],
-    "submitted": "2026-02-27",
-    "categories": [
-      "cs.CL",
       "cs.AI"
     ],
-    "pdf_url": "https://arxiv.org/pdf/2602.24287",
-    "abs_url": "https://arxiv.org/abs/2602.24287"
+    "pdf_url": "https://arxiv.org/pdf/2603.01746",
+    "abs_url": "https://arxiv.org/abs/2603.01746"
   },
   {
-    "arxiv_id": "2602.24286",
-    "title": "CUDA Agent: Large-Scale Agentic RL for High-Performance CUDA Kernel Generation",
-    "abstract": "GPU kernel optimization is fundamental to modern deep learning but remains a highly specialized task requiring deep hardware expertise. Despite strong performance in general programming, large language models (LLMs) remain uncompetitive with compiler-based systems such as torch.compile for CUDA kernel generation. Existing CUDA code generation approaches either rely on training-free refinement or fine-tune models within fixed multi-turn execution-feedback loops, but both paradigms fail to fundamentally improve the model's intrinsic CUDA optimization ability, resulting in limited performance gains. We present CUDA Agent, a large-scale agentic reinforcement learning system that develops CUDA kernel expertise through three components: a scalable data synthesis pipeline, a skill-augmented CUDA development environment with automated verification and profiling to provide reliable reward signals, and reinforcement learning algorithmic techniques enabling stable training. CUDA Agent achieves state-of-the-art results on KernelBench, delivering 100\\%, 100\\%, and 92\\% faster rate over torch.compile on KernelBench Level-1, Level-2, and Level-3 splits, outperforming the strongest proprietary models such as Claude Opus 4.5 and Gemini 3 Pro by about 40\\% on the hardest Level-3 setting.",
+    "arxiv_id": "2603.01743",
+    "title": "Action-Guided Attention for Video Action Anticipation",
+    "abstract": "Anticipating future actions in videos is challenging, as the observed frames provide only evidence of past activities, requiring the inference of latent intentions to predict upcoming actions. Existing transformer-based approaches, which rely on dot-product attention over pixel representations, often lack the high-level semantics necessary to model video sequences for effective action anticipation. As a result, these methods tend to overfit to explicit visual cues present in the past frames, limiting their ability to capture underlying intentions and degrading generalization to unseen samples. To address this, we propose Action-Guided Attention (AGA), an attention mechanism that explicitly leverages predicted action sequences as queries and keys to guide sequence modeling. Our approach fosters the attention module to emphasize relevant moments from the past based on the upcoming activity and combine this information with the current frame embedding via a dedicated gating function. The design of AGA enables post-training analysis of the knowledge discovered from the training set. Experiments on the widely adopted EPIC-Kitchens-100 benchmark demonstrate that AGA generalizes well from validation to unseen test sets. Post-training analysis can further examine the action dependencies captured by the model and the counterfactual evidence it has internalized, offering transparent and interpretable insights into its anticipative predictions.",
     "authors": [
-      "Weinan Dai",
-      "Hanlin Wu",
-      "Qiying Yu",
-      "Huan-ang Gao",
-      "Jiahao Li",
-      "Chengquan Jiang",
-      "Weiqiang Lou",
-      "Yufan Song",
-      "Hongli Yu",
-      "Jiaze Chen",
-      "Wei-Ying Ma",
-      "Ya-Qin Zhang",
-      "Jingjing Liu",
-      "Mingxuan Wang",
-      "Xin Liu",
-      "Hao Zhou"
+      "Tsung-Ming Tai",
+      "Sofia Casarin",
+      "Andrea Pilzer",
+      "Werner Nutt",
+      "Oswald Lanz"
     ],
-    "submitted": "2026-02-27",
-    "categories": [
-      "cs.LG",
-      "cs.AI"
-    ],
-    "pdf_url": "https://arxiv.org/pdf/2602.24286",
-    "abs_url": "https://arxiv.org/abs/2602.24286"
-  },
-  {
-    "arxiv_id": "2602.24283",
-    "title": "Taming Momentum: Rethinking Optimizer States Through Low-Rank Approximation",
-    "abstract": "Modern optimizers like Adam and Muon are central to training large language models, but their reliance on first- and second-order momenta introduces significant memory overhead, which constrains scalability and computational efficiency. In this work, we reframe the exponential moving average (EMA) used in these momenta as the training of a linear regressor via online gradient flow. Building on this equivalence, we introduce LoRA-Pre, a novel low-rank optimizer designed for efficient pre-training. Specifically, LoRA-Pre reduces the optimizer's memory footprint by decomposing the full momentum matrix into a compact low-rank subspace within the online linear learner, thereby maintaining optimization performance while improving memory efficiency. We empirically validate LoRA-Pre's efficacy by pre-training models from the Llama architecture family, scaling from 60M to 1B parameters. LoRA-Pre achieves the highest performance across all model sizes. Notably, LoRA-Pre demonstrates remarkable rank efficiency, achieving comparable or superior results using only 1/8 the rank of baseline methods. Beyond pre-training, we evaluate LoRA-Pre's effectiveness in fine-tuning scenarios. With the same rank, LoRA-Pre consistently outperforms all efficient fine-tuning baselines. Specifically, compared to standard LoRA, LoRA-Pre achieves substantial improvements of 3.14 points on Llama-3.1-8B and 6.17 points on Llama-2-7B, validating our approach's effectiveness across both pre-training and fine-tuning paradigms. Our code is publicly available at https://github.com/mrflogs/LoRA-Pre.",
-    "authors": [
-      "Zhengbo Wang",
-      "Jian Liang",
-      "Ran He",
-      "Zilei Wang",
-      "Tieniu Tan"
-    ],
-    "submitted": "2026-02-27",
-    "categories": [
-      "cs.LG",
-      "cs.AI",
-      "cs.CL"
-    ],
-    "pdf_url": "https://arxiv.org/pdf/2602.24283",
-    "abs_url": "https://arxiv.org/abs/2602.24283"
-  },
-  {
-    "arxiv_id": "2602.24281",
-    "title": "Memory Caching: RNNs with Growing Memory",
-    "abstract": "Transformers have been established as the de-facto backbones for most recent advances in sequence modeling, mainly due to their growing memory capacity that scales with the context length. While plausible for retrieval tasks, it causes quadratic complexity and so has motivated recent studies to explore viable subquadratic recurrent alternatives. Despite showing promising preliminary results in diverse domains, such recurrent architectures underperform Transformers in recall-intensive tasks, often attributed to their fixed-size memory. In this paper, we introduce Memory Caching (MC), a simple yet effective technique that enhances recurrent models by caching checkpoints of their memory states (a.k.a. hidden states). Memory Caching allows the effective memory capacity of RNNs to grow with sequence length, offering a flexible trade-off that interpolates between the fixed memory (i.e., $O(L)$ complexity) of RNNs and the growing memory (i.e., $O(L^2)$ complexity) of Transformers. We propose four variants of MC, including gated aggregation and sparse selective mechanisms, and discuss their implications on both linear and deep memory modules. Our experimental results on language modeling, and long-context understanding tasks show that MC enhances the performance of recurrent models, supporting its effectiveness. The results of in-context recall tasks indicate that while Transformers achieve the best accuracy, our MC variants show competitive performance, close the gap with Transformers, and performs better than state-of-the-art recurrent models.",
-    "authors": [
-      "Ali Behrouz",
-      "Zeman Li",
-      "Yuan Deng",
-      "Peilin Zhong",
-      "Meisam Razaviyayn",
-      "Vahab Mirrokni"
-    ],
-    "submitted": "2026-02-27",
-    "categories": [
-      "cs.LG",
-      "cs.AI"
-    ],
-    "pdf_url": "https://arxiv.org/pdf/2602.24281",
-    "abs_url": "https://arxiv.org/abs/2602.24281"
-  },
-  {
-    "arxiv_id": "2602.24278",
-    "title": "Who Guards the Guardians? The Challenges of Evaluating Identifiability of Learned Representations",
-    "abstract": "Identifiability in representation learning is commonly evaluated using standard metrics (e.g., MCC, DCI, R^2) on synthetic benchmarks with known ground-truth factors. These metrics are assumed to reflect recovery up to the equivalence class guaranteed by identifiability theory. We show that this assumption holds only under specific structural conditions: each metric implicitly encodes assumptions about both the data-generating process (DGP) and the encoder. When these assumptions are violated, metrics become misspecified and can produce systematic false positives and false negatives. Such failures occur both within classical identifiability regimes and in post-hoc settings where identifiability is most needed. We introduce a taxonomy separating DGP assumptions from encoder geometry, use it to characterise the validity domains of existing metrics, and release an evaluation suite for reproducible stress testing and comparison.",
-    "authors": [
-      "Shruti Joshi",
-      "Théo Saulus",
-      "Wieland Brendel",
-      "Philippe Brouillard",
-      "Dhanya Sridhar",
-      "Patrik Reizinger"
-    ],
-    "submitted": "2026-02-27",
-    "categories": [
-      "cs.LG"
-    ],
-    "pdf_url": "https://arxiv.org/pdf/2602.24278",
-    "abs_url": "https://arxiv.org/abs/2602.24278"
-  },
-  {
-    "arxiv_id": "2602.24277",
-    "title": "Resources for Automated Evaluation of Assistive RAG Systems that Help Readers with News Trustworthiness Assessment",
-    "abstract": "Many readers today struggle to assess the trustworthiness of online news because reliable reporting coexists with misinformation. The TREC 2025 DRAGUN (Detection, Retrieval, and Augmented Generation for Understanding News) Track provided a venue for researchers to develop and evaluate assistive RAG systems that support readers' news trustworthiness assessment by producing reader-oriented, well-attributed reports. As the organizers of the DRAGUN track, we describe the resources that we have newly developed to allow for the reuse of the track's tasks. The track had two tasks: (Task 1) Question Generation, producing 10 ranked investigative questions; and (Task 2, the main task) Report Generation, producing a 250-word report grounded in the MS MARCO V2.1 Segmented Corpus. As part of the track's evaluation, we had TREC assessors create importance-weighted rubrics of questions with expected short answers for 30 different news articles. These rubrics represent the information that assessors believe is important for readers to assess an article's trustworthiness. The assessors then used their rubrics to manually judge the participating teams' submitted runs. To make these tasks and their rubrics reusable, we have created an automated process to judge runs not part of the original assessing. We show that our AutoJudge ranks existing runs well compared to the TREC human-assessed evaluation (Kendall's $τ= 0.678$ for Task 1 and $τ= 0.872$ for Task 2). These resources enable both the evaluation of RAG systems for assistive news trustworthiness assessment and, with the human evaluation as a benchmark, research on improving automated RAG evaluation.",
-    "authors": [
-      "Dake Zhang",
-      "Mark D. Smucker",
-      "Charles L. A. Clarke"
-    ],
-    "submitted": "2026-02-27",
-    "categories": [
-      "cs.IR",
-      "cs.AI"
-    ],
-    "pdf_url": "https://arxiv.org/pdf/2602.24277",
-    "abs_url": "https://arxiv.org/abs/2602.24277"
-  },
-  {
-    "arxiv_id": "2602.24275",
-    "title": "Hierarchical Action Learning for Weakly-Supervised Action Segmentation",
-    "abstract": "Humans perceive actions through key transitions that structure actions across multiple abstraction levels, whereas machines, relying on visual features, tend to over-segment. This highlights the difficulty of enabling hierarchical reasoning in video understanding. Interestingly, we observe that lower-level visual and high-level action latent variables evolve at different rates, with low-level visual variables changing rapidly, while high-level action variables evolve more slowly, making them easier to identify. Building on this insight, we propose the Hierarchical Action Learning (\\textbf{HAL}) model for weakly-supervised action segmentation. Our approach introduces a hierarchical causal data generation process, where high-level latent action governs the dynamics of low-level visual features. To model these varying timescales effectively, we introduce deterministic processes to align these latent variables over time. The \\textbf{HAL} model employs a hierarchical pyramid transformer to capture both visual features and latent variables, and a sparse transition constraint is applied to enforce the slower dynamics of high-level action variables. This mechanism enhances the identification of these latent variables over time. Under mild assumptions, we prove that these latent action variables are strictly identifiable. Experimental results on several benchmarks show that the \\textbf{HAL} model significantly outperforms existing methods for weakly-supervised action segmentation, confirming its practical effectiveness in real-world applications.",
-    "authors": [
-      "Junxian Huang",
-      "Ruichu Cai",
-      "Hao Zhu",
-      "Juntao Fang",
-      "Boyan Xu",
-      "Weilin Chen",
-      "Zijian Li",
-      "Shenghua Gao"
-    ],
-    "submitted": "2026-02-27",
+    "submitted": "2026-03-02",
     "categories": [
       "cs.CV"
     ],
-    "pdf_url": "https://arxiv.org/pdf/2602.24275",
-    "abs_url": "https://arxiv.org/abs/2602.24275"
+    "pdf_url": "https://arxiv.org/pdf/2603.01743",
+    "abs_url": "https://arxiv.org/abs/2603.01743"
+  },
+  {
+    "arxiv_id": "2603.01741",
+    "title": "Rethinking Policy Diversity in Ensemble Policy Gradient in Large-Scale Reinforcement Learning",
+    "abstract": "Scaling reinforcement learning to tens of thousands of parallel environments requires overcoming the limited exploration capacity of a single policy. Ensemble-based policy gradient methods, which employ multiple policies to collect diverse samples, have recently been proposed to promote exploration. However, merely broadening the exploration space does not always enhance learning capability, since excessive exploration can reduce exploration quality or compromise training stability. In this work, we theoretically analyze the impact of inter-policy diversity on learning efficiency in policy ensembles, and propose Coupled Policy Optimization which regulates diversity through KL constraints between policies. The proposed method enables effective exploration and outperforms strong baselines such as SAPG, PBT, and PPO across multiple tasks, including challenging dexterous manipulation, in terms of both sample efficiency and final performance. Furthermore, analysis of policy diversity and effective sample size during training reveals that follower policies naturally distribute around the leader, demonstrating the emergence of structured and efficient exploratory behavior. Our results indicate that diverse exploration under appropriate regulation is key to achieving stable and sample-efficient learning in ensemble policy gradient methods. Project page at https://naoki04.github.io/paper-cpo/ .",
+    "authors": [
+      "Naoki Shitanda",
+      "Motoki Omura",
+      "Tatsuya Harada",
+      "Takayuki Osa"
+    ],
+    "submitted": "2026-03-02",
+    "categories": [
+      "cs.LG",
+      "cs.AI",
+      "cs.RO"
+    ],
+    "pdf_url": "https://arxiv.org/pdf/2603.01741",
+    "abs_url": "https://arxiv.org/abs/2603.01741"
+  },
+  {
+    "arxiv_id": "2603.01739",
+    "title": "CA-AFP: Cluster-Aware Adaptive Federated Pruning",
+    "abstract": "Federated Learning (FL) faces major challenges in real-world deployments due to statistical heterogeneity across clients and system heterogeneity arising from resource-constrained devices. While clustering-based approaches mitigate statistical heterogeneity and pruning techniques improve memory and communication efficiency, these strategies are typically studied in isolation.   We propose CA-AFP, a unified framework that jointly addresses both challenges by performing cluster-specific model pruning. In CA-AFP, clients are first grouped into clusters, and a separate model for each cluster is adaptively pruned during training. The framework introduces two key innovations: (1) a cluster-aware importance scoring mechanism that combines weight magnitude, intra-cluster coherence, and gradient consistency to identify parameters for pruning, and (2) an iterative pruning schedule that progressively removes parameters while enabling model self-healing through weight regrowth.   We evaluate CA-AFP on two widely used human activity recognition benchmarks, UCI HAR and WISDM, under natural user-based federated partitions. Experimental results demonstrate that CA-AFP achieves a favorable balance between predictive accuracy, inter-client fairness, and communication efficiency. Compared to pruning-based baselines, CA-AFP consistently improves accuracy and lower performance disparity across clients with limited fine-tuning, while requiring substantially less communication than dense clustering-based methods. It also shows robustness to different Non-IID levels of data. Finally, ablation studies analyze the impact of clustering, pruning schedules and scoring mechanism offering practical insights into the design of efficient and adaptive FL systems.",
+    "authors": [
+      "Om Govind Jha",
+      "Harsh Shukla",
+      "Haroon R. Lone"
+    ],
+    "submitted": "2026-03-02",
+    "categories": [
+      "cs.LG",
+      "cs.AI",
+      "cs.DC"
+    ],
+    "pdf_url": "https://arxiv.org/pdf/2603.01739",
+    "abs_url": "https://arxiv.org/abs/2603.01739"
+  },
+  {
+    "arxiv_id": "2603.01732",
+    "title": "Bootstrapping Embeddings for Low Resource Languages",
+    "abstract": "Embedding models are crucial to modern NLP. However, the creation of the most effective models relies on carefully constructed supervised finetuning data. For high resource languages, such as English, such datasets are readily available. However, for hundreds of other languages, they are simply non-existent. We investigate whether the advent of large language models can help to bridge this gap. We test three different strategies for generating synthetic triplet data used to optimise embedding models. These include in-context learning as well as two novel approaches, leveraging adapter composition and cross lingual finetuning of the LLM generator (XL-LoRA) respectively. We find that while in-context learning still falls short of strong non-synthetic baselines, adapter composition and XL-LoRA yield strong performance gains across a wide array of tasks and languages, offering a clear, scalable pathway to producing performant embedding models for a wide variety of languages.",
+    "authors": [
+      "Merve Basoz",
+      "Andrew Horne",
+      "Mattia Opper"
+    ],
+    "submitted": "2026-03-02",
+    "categories": [
+      "cs.CL"
+    ],
+    "pdf_url": "https://arxiv.org/pdf/2603.01732",
+    "abs_url": "https://arxiv.org/abs/2603.01732"
+  },
+  {
+    "arxiv_id": "2603.01731",
+    "title": "Solving Inverse PDE Problems using Minimization Methods and AI",
+    "abstract": "Many physical and engineering systems require solving direct problems to predict behavior and inverse problems to determine unknown parameters from measurement. In this work, we study both aspects for systems governed by differential equations, contrasting well-established numerical methods with new AI-based techniques, specifically Physics-Informed Neural Networks (PINNs). We first analyze the logistic differential equation, using its closed-form solution to verify numerical schemes and validate PINN performance. We then address the Porous Medium Equation (PME), a nonlinear partial differential equation with no general closed-form solution, building strong solvers of the direct problem and testing techniques for parameter estimation in the inverse problem. Our results suggest that PINNs can closely estimate solutions at competitive computational cost, and thus propose an effective tool for solving both direct and inverse problems for complex systems.",
+    "authors": [
+      "Noura Helwani",
+      "Sophie Moufawad",
+      "Georges Sakr"
+    ],
+    "submitted": "2026-03-02",
+    "categories": [
+      "math.NA",
+      "cs.AI",
+      "math.AP",
+      "math.OC"
+    ],
+    "pdf_url": "https://arxiv.org/pdf/2603.01731",
+    "abs_url": "https://arxiv.org/abs/2603.01731"
+  },
+  {
+    "arxiv_id": "2603.01730",
+    "title": "Decentralized Federated Learning by Partial Message Exchange",
+    "abstract": "Decentralized federated learning (DFL) has emerged as a transformative server-free paradigm that enables collaborative learning over large-scale heterogeneous networks. However, it continues to face fundamental challenges, including data heterogeneity, restrictive assumptions for theoretical analysis, and degraded convergence when standard communication- or privacyenhancing techniques are applied. To overcome these drawbacks, this paper develops a novel algorithm, PaME (DFL by Partial Message Exchange). The central principle is to allow only randomly selected sparse coordinates to be exchanged between two neighbor nodes. Consequently, PaME achieves substantial reductions in communication costs while still preserving a high level of privacy, without sacrificing accuracy. Moreover, grounded in rigorous analysis, the algorithm is shown to converge at a linear rate under the gradient to be locally Lipschitz continuous and the communication matrix to be doubly stochastic. These two mild assumptions not only dispense with many restrictive conditions commonly imposed by existing DFL methods but also enables PaME to effectively address data heterogeneity. Furthermore, comprehensive numerical experiments demonstrate its superior performance compared with several representative decentralized learning algorithms.",
+    "authors": [
+      "Shan Sha",
+      "Shenglong Zhou",
+      "Xin Wang",
+      "Lingchen Kong",
+      "Geoffrey Ye Li"
+    ],
+    "submitted": "2026-03-02",
+    "categories": [
+      "cs.LG"
+    ],
+    "pdf_url": "https://arxiv.org/pdf/2603.01730",
+    "abs_url": "https://arxiv.org/abs/2603.01730"
+  },
+  {
+    "arxiv_id": "2603.01724",
+    "title": "GMP: A Benchmark for Content Moderation under Co-occurring Violations and Dynamic Rules",
+    "abstract": "Online content moderation is essential for maintaining a healthy digital environment, and reliance on AI for this task continues to grow. Consider a user comment using national stereotypes to insult a politician. This example illustrates two critical challenges in real-world scenarios: (1) Co-occurring Violations, where a single post violates multiple policies (e.g., prejudice and personal attacks); (2) Dynamic rules of moderation, where determination of a violation depends on platform-specific guidelines that evolve across contexts . The intersection of co-occurring harms and dynamically changing rules highlights a core limitation of current AI systems: although large language models (LLMs) are adept at following fixed guidelines, their judgment capabilities degrade when policies are unstable or context-dependent . In practice, such shortcomings lead to inconsistent moderation: either erroneously restricting legitimate expression or allowing harmful content to remain online . This raises a critical question for evaluation: Does high performance on existing static benchmarks truly guarantee robust generalization of AI judgment to real-world scenarios involving co-occurring violations and dynamically changing rules?",
+    "authors": [
+      "Houde Dong",
+      "Yifei She",
+      "Kai Ye",
+      "Liangcai Su",
+      "Chenxiong Qian",
+      "Jie Hao"
+    ],
+    "submitted": "2026-03-02",
+    "categories": [
+      "cs.AI"
+    ],
+    "pdf_url": "https://arxiv.org/pdf/2603.01724",
+    "abs_url": "https://arxiv.org/abs/2603.01724"
   }
 ]

@@ -1,9 +1,9 @@
 {
-  "goal": "深度分析 2602.24289（Mode Seeking meets Mean Seeking for Fast Long Video Generation），PDF已下载到/Applications/workspace/ailab/research/agent_runtime_core_final/survey_agent/data/pdfs/2602.24289.pdf，生成总结，写入knowledge_base/Computer_Vision/paper_2602.24289.md，更新meta.json",
+  "goal": "深度分析 2603.01748（Discrete World Models via Regularization），PDF已下载到/Applications/workspace/ailab/research/agent_runtime_core_final/survey_agent/data/pdfs/2603.01748.pdf，生成总结，写入knowledge_base/Reinforcement_Learning/paper_2603.01748.md，更新meta.json",
   "subgoals": [
-    "深度分析 2602.24289（Mode Seeking meets Mean Seeking for Fast Long Video Generation），PDF已下载到/Applications/workspace/ailab/research/agent_runtime_core_final/survey_agent/data/pdfs/2602.24289.pdf，生成总结，写入knowledge_base/Computer_Vision/paper_2602.24289.md，更新meta.json"
+    "深度分析 2603.01748（Discrete World Models via Regularization），PDF已下载到/Applications/workspace/ailab/research/agent_runtime_core_final/survey_agent/data/pdfs/2603.01748.pdf，生成总结，写入knowledge_base/Reinforcement_Learning/paper_2603.01748.md，更新meta.json"
   ],
-  "currentSubgoal": "深度分析 2602.24289（Mode Seeking meets Mean Seeking for Fast Long Video Generation），PDF已下载到/Applications/workspace/ailab/research/agent_runtime_core_final/survey_agent/data/pdfs/2602.24289.pdf，生成总结，写入knowledge_base/Computer_Vision/paper_2602.24289.md，更新meta.json",
+  "currentSubgoal": "深度分析 2603.01748（Discrete World Models via Regularization），PDF已下载到/Applications/workspace/ailab/research/agent_runtime_core_final/survey_agent/data/pdfs/2603.01748.pdf，生成总结，写入knowledge_base/Reinforcement_Learning/paper_2603.01748.md，更新meta.json",
   "archivedSubgoals": [],
   "mode": "plan",
   "permissions": 2,

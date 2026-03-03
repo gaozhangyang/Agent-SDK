@@ -1,6 +1,6 @@
 // tests/core/memory.test.ts
 
-import { Memory } from '../../src/core/memory';
+import { Memory, type Subgoal, type SubgoalOutcome } from '../../src/core/memory';
 import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
@@ -116,16 +116,59 @@ describe('Memory', () => {
     expect(content).toContain('task');
   });
 
-  test('archivedSubgoal 字段正确保存', () => {
+  test('subgoals 字段正确保存（v2 新数据结构）', () => {
     const memory = new Memory();
+    
+    const subgoals: Subgoal[] = [
+      { goal: '子目标1', summary: '成功完成', outcome: 'completed' },
+      { goal: '子目标2', summary: '此路不通', outcome: 'voided' },
+    ];
     
     memory.append({ 
       userRequest: '修复bug', 
-      solutionSummary: '修改代码',
-      archivedSubgoal: '修复数组越界',
+      solutionSummary: '已完成',
+      subgoals,
     });
 
     const entries = memory.all();
-    expect(entries[0].archivedSubgoal).toBe('修复数组越界');
+    expect(entries[0].subgoals).toHaveLength(2);
+    expect(entries[0].subgoals?.[0].goal).toBe('子目标1');
+    expect(entries[0].subgoals?.[0].outcome).toBe('completed');
+    expect(entries[0].subgoals?.[1].outcome).toBe('voided');
+  });
+
+  test('updateLastEntry 更新 solutionSummary 和 subgoals', () => {
+    const memory = new Memory();
+    
+    memory.append({ userRequest: 'task', solutionSummary: '进行中' });
+    
+    const subgoals: Subgoal[] = [
+      { goal: 'sub1', summary: 'summary1', outcome: 'completed' },
+    ];
+    
+    memory.updateLastEntry('已完成', subgoals);
+    
+    const entries = memory.all();
+    expect(entries[0].solutionSummary).toBe('已完成');
+    expect(entries[0].subgoals).toEqual(subgoals);
+  });
+
+  test('MemoryEntry 类型包含 ts, userRequest, solutionSummary, subgoals', () => {
+    const memory = new Memory();
+    
+    memory.append({
+      userRequest: 'test request',
+      solutionSummary: 'test summary',
+      subgoals: [
+        { goal: 'goal1', summary: 'summary1', outcome: 'completed' as SubgoalOutcome },
+      ],
+    });
+
+    const entry = memory.all()[0];
+    expect(entry.ts).toBeDefined();
+    expect(entry.userRequest).toBe('test request');
+    expect(entry.solutionSummary).toBe('test summary');
+    expect(entry.subgoals).toBeDefined();
+    expect(entry.subgoals?.[0].goal).toBe('goal1');
   });
 });

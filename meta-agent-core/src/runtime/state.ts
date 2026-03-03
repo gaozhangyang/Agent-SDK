@@ -6,11 +6,19 @@ import path from 'path';
 export type PermissionLevel = 0 | 1 | 2 | 3 | 4;
 export type Mode = 'plan' | 'execute' | 'review' | 'recovery' | 'paused';
 
+export type SubgoalOutcome = 'completed' | 'voided';
+
+export type ArchivedSubgoal = {
+  goal: string;
+  summary: string;           // 该子目标的解决结论
+  outcome: SubgoalOutcome;  // voided = 被 Recovery 回滚，此路不通
+};
+
 export type AgentState = {
   goal: string;
   subgoals: string[];
   currentSubgoal: string | null;
-  archivedSubgoals: string[];    // v2 新增：已完成子目标，不再进入 active context
+  archivedSubgoals: ArchivedSubgoal[];  // v2 新增：已完成子目标，包含结论和结果
   mode: Mode;
   permissions: PermissionLevel;
   iterationCount: number;

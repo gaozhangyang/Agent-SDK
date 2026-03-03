@@ -115,7 +115,7 @@ def load_config() -> Dict[str, Any]:
                     "model": "MiniMax-M2.5",
                     "apiKey": "",
                 },
-                "sdk_url": "http://127.0.0.1:3889",
+                "sdk_url": "http://127.0.0.1:3890",
             },
         }
 

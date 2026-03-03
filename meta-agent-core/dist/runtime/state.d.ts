@@ -1,10 +1,16 @@
 export type PermissionLevel = 0 | 1 | 2 | 3 | 4;
 export type Mode = 'plan' | 'execute' | 'review' | 'recovery' | 'paused';
+export type SubgoalOutcome = 'completed' | 'voided';
+export type ArchivedSubgoal = {
+    goal: string;
+    summary: string;
+    outcome: SubgoalOutcome;
+};
 export type AgentState = {
     goal: string;
     subgoals: string[];
     currentSubgoal: string | null;
-    archivedSubgoals: string[];
+    archivedSubgoals: ArchivedSubgoal[];
     mode: Mode;
     permissions: PermissionLevel;
     iterationCount: number;

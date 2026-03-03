@@ -1,10 +1,12 @@
 "use strict";
 // 对外入口 index.ts — 导出所有模块 + createMetaAgent 工厂
+// 修改：统一 seq 序号空间、AGENT.md strategies 配置
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.createErrorClassifier = exports.createPermissionHooks = exports.createModeHooks = exports.InterruptChannel = exports.StateManager = exports.createInitialState = exports.canTransition = exports.runLoop = exports.Harness = exports.Memory = exports.TerminalLog = exports.Trace = exports.collect = exports.LLMCall = void 0;
+exports.createErrorClassifier = exports.createPermissionHooks = exports.createModeHooks = exports.InterruptChannel = exports.StateManager = exports.createInitialState = exports.canTransition = exports.runLoop = exports.Harness = exports.Memory = exports.GlobalSeqManager = exports.TerminalLog = exports.Trace = exports.collect = exports.LLMCall = void 0;
+exports.parseStrategiesConfig = parseStrategiesConfig;
 exports.createMetaAgent = createMetaAgent;
 const path_1 = __importDefault(require("path"));
 const promises_1 = __importDefault(require("fs/promises"));
@@ -16,6 +18,7 @@ Object.defineProperty(exports, "collect", { enumerable: true, get: function () {
 const trace_1 = require("./core/trace");
 Object.defineProperty(exports, "Trace", { enumerable: true, get: function () { return trace_1.Trace; } });
 Object.defineProperty(exports, "TerminalLog", { enumerable: true, get: function () { return trace_1.TerminalLog; } });
+Object.defineProperty(exports, "GlobalSeqManager", { enumerable: true, get: function () { return trace_1.GlobalSeqManager; } });
 const memory_1 = require("./core/memory");
 Object.defineProperty(exports, "Memory", { enumerable: true, get: function () { return memory_1.Memory; } });
 const harness_1 = require("./runtime/harness");
@@ -34,23 +37,116 @@ const permission_guard_1 = require("./hooks/permission-guard");
 Object.defineProperty(exports, "createPermissionHooks", { enumerable: true, get: function () { return permission_guard_1.createPermissionHooks; } });
 const error_classifier_1 = require("./hooks/error-classifier");
 Object.defineProperty(exports, "createErrorClassifier", { enumerable: true, get: function () { return error_classifier_1.createErrorClassifier; } });
+/**
+ * 从 AGENT.md 内容中解析策略层配置
+ */
+function parseStrategiesConfig(agentMdContent) {
+    const defaultConfig = {
+        level: 'L1',
+        mode_fsm: 'enabled',
+        permission_fsm: 'enabled',
+        harness: 'standard',
+        error_classifier: 'enabled',
+        judge: {
+            outcome: 'required',
+            risk: 'enabled',
+            milestone: 'enabled',
+            capability: 'enabled',
+            selection: 'disabled',
+        },
+    };
+    if (!agentMdContent) {
+        return defaultConfig;
+    }
+    // 解析 strategies 配置块
+    const strategiesMatch = agentMdContent.match(/strategies:\s*([\s\S]*?)(?=\n\S|\n$|$)/i);
+    if (!strategiesMatch) {
+        return defaultConfig;
+    }
+    const strategiesContent = strategiesMatch[1];
+    const config = { ...defaultConfig };
+    // 解析 level
+    const levelMatch = strategiesContent.match(/level:\s*(L\d+)/i);
+    if (levelMatch) {
+        config.level = levelMatch[1];
+    }
+    // 解析 mode_fsm
+    const modeFsmMatch = strategiesContent.match(/mode_fsm:\s*(enabled|disabled)/i);
+    if (modeFsmMatch) {
+        config.mode_fsm = modeFsmMatch[1];
+    }
+    // 解析 permission_fsm
+    const permFsmMatch = strategiesContent.match(/permission_fsm:\s*(enabled|disabled)/i);
+    if (permFsmMatch) {
+        config.permission_fsm = permFsmMatch[1];
+    }
+    // 解析 harness
+    const harnessMatch = strategiesContent.match(/harness:\s*(standard|aggressive|disabled)/i);
+    if (harnessMatch) {
+        config.harness = harnessMatch[1];
+    }
+    // 解析 error_classifier
+    const errorMatch = strategiesContent.match(/error_classifier:\s*(enabled|disabled)/i);
+    if (errorMatch) {
+        config.error_classifier = errorMatch[1];
+    }
+    // 解析 judge 配置块
+    const judgeBlockMatch = strategiesContent.match(/judge:\s*([\s\S]*?)(?=\n\S|$)/i);
+    if (judgeBlockMatch) {
+        const judgeContent = judgeBlockMatch[1];
+        const defaultJudge = {
+            outcome: 'required',
+            risk: 'enabled',
+            milestone: 'enabled',
+            capability: 'enabled',
+            selection: 'disabled',
+        };
+        const outcomeMatch = judgeContent.match(/outcome:\s*(required|rule_based|disabled)/i);
+        if (outcomeMatch)
+            defaultJudge.outcome = outcomeMatch[1];
+        const riskMatch = judgeContent.match(/risk:\s*(enabled|disabled)/i);
+        if (riskMatch)
+            defaultJudge.risk = riskMatch[1];
+        const milestoneMatch = judgeContent.match(/milestone:\s*(enabled|disabled)/i);
+        if (milestoneMatch)
+            defaultJudge.milestone = milestoneMatch[1];
+        const capabilityMatch = judgeContent.match(/capability:\s*(enabled|disabled)/i);
+        if (capabilityMatch)
+            defaultJudge.capability = capabilityMatch[1];
+        const selectionMatch = judgeContent.match(/selection:\s*(enabled|disabled)/i);
+        if (selectionMatch)
+            defaultJudge.selection = selectionMatch[1];
+        config.judge = defaultJudge;
+    }
+    return config;
+}
 async function createMetaAgent(projectPath, goal, llmProvider, options) {
     // 1. 创建 .agent/ 目录
     const agentDir = path_1.default.join(projectPath, '.agent');
     await promises_1.default.mkdir(agentDir, { recursive: true });
-    // 2. 初始化 Trace、TerminalLog 和 Memory
+    // 2. 解析 AGENT.md 中的策略层配置
+    const strategiesConfig = parseStrategiesConfig(options?.agentMdContent);
+    // 3. 初始化 Trace、TerminalLog 和 Memory
     // 遵循 agent-design-principles-v2.md 核心层 4：项目目录约定
+    // 遵循 change.md 修改：terminal.log → terminal.md
     const traceLogPath = options?.logToFile ? path_1.default.join(agentDir, 'trace.jsonl') : undefined;
-    const terminalLogPath = options?.logToFile ? path_1.default.join(agentDir, 'terminal.log') : undefined;
+    const terminalLogPath = options?.logToFile ? path_1.default.join(agentDir, 'terminal.md') : undefined; // 改为 .md
     const memoryLogPath = options?.logToFile ? path_1.default.join(agentDir, 'memory.jsonl') : undefined;
+    // 创建全局序号管理器（统一 seq 序号空间）
+    const seqManager = new trace_1.GlobalSeqManager(traceLogPath);
     const trace = new trace_1.Trace(traceLogPath);
-    const terminalLog = new trace_1.TerminalLog(terminalLogPath);
+    // 将 seqManager 注入到 TerminalLog
+    const terminalLog = new trace_1.TerminalLog(traceLogPath, terminalLogPath, projectPath);
+    terminalLog.setSeqManager(seqManager);
     const memory = new memory_1.Memory(memoryLogPath);
-    // 3. 用 localPrimitives 创建原语
+    // 4. 用 localPrimitives 创建原语
     // coreDir 为当前 SDK 的 src/ 目录绝对路径
+    // 从 AGENT.md 解析截断配置
+    const truncationConfig = (0, primitives_1.parseTruncationConfig)(options?.agentMdContent);
     const coreDir = path_1.default.resolve(__dirname, '..');
-    const primitives = (0, primitives_1.localPrimitives)(coreDir, terminalLog);
-    // 4. 用 StateManager 尝试恢复 State，失败则 createInitial
+    // 传入 trace 实例，用于补齐 trace.jsonl 的 kind 字段
+    const primitives = (0, primitives_1.localPrimitives)(coreDir, terminalLog, trace, truncationConfig);
+    // 5. 用 StateManager 尝试恢复 State，失败则 createInitial
     const stateManager = new state_1.StateManager();
     let state = await stateManager.load(agentDir);
     const isResumed = state !== null;
@@ -72,13 +168,22 @@ async function createMetaAgent(projectPath, goal, llmProvider, options) {
         if (memoryLogPath)
             await memory.loadFromFile();
     }
-    // 5. 组合标准 hooks：createModeHooks() + createPermissionHooks() + createErrorClassifier()
+    // 6. 根据 strategiesConfig 组合 hooks
+    // 只有当对应策略 enabled 时才启用
+    const standardHooks = {};
+    // Mode 状态机
+    if (strategiesConfig.mode_fsm === 'enabled') {
+        Object.assign(standardHooks, (0, mode_state_machine_1.createModeHooks)(trace));
+    }
+    // 权限状态机
+    if (strategiesConfig.permission_fsm === 'enabled') {
+        Object.assign(standardHooks, (0, permission_guard_1.createPermissionHooks)());
+    }
+    // 错误分类
+    if (strategiesConfig.error_classifier === 'enabled') {
+        Object.assign(standardHooks, (0, error_classifier_1.createErrorClassifier)());
+    }
     // options.hooks 优先级高于标准 hooks
-    const standardHooks = {
-        ...(0, mode_state_machine_1.createModeHooks)(trace),
-        ...(0, permission_guard_1.createPermissionHooks)(),
-        ...(0, error_classifier_1.createErrorClassifier)(),
-    };
     const mergedHooks = {
         ...standardHooks,
         ...options?.hooks,
@@ -90,16 +195,16 @@ async function createMetaAgent(projectPath, goal, llmProvider, options) {
         classifyError: options?.hooks?.classifyError ?? standardHooks.classifyError,
         onInterrupt: options?.hooks?.onInterrupt ?? standardHooks.onInterrupt,
     };
-    // 6. 创建 LLMCall 实例
+    // 7. 创建 LLMCall 实例
     const llm = new llm_1.LLMCall(llmProvider);
     // 设置静态上下文（AGENT.md 内容）
     if (options?.agentMdContent) {
         llm.setStaticContext(options.agentMdContent);
     }
-    // 7. 创建 Harness 和 InterruptChannel
+    // 8. 创建 Harness 和 InterruptChannel
     const harness = new harness_1.Harness(primitives, projectPath, agentDir);
     const interrupt = new interrupt_1.InterruptChannel();
-    // 8. 构建 LoopDeps
+    // 9. 构建 LoopDeps
     const deps = {
         primitives,
         llm,
@@ -112,7 +217,7 @@ async function createMetaAgent(projectPath, goal, llmProvider, options) {
         agentDir,
         skillsDir: options?.skillsDir, // 传递 skills 目录路径
     };
-    // 9. 返回 MetaAgent 对象
+    // 10. 返回 MetaAgent 对象
     return {
         run: async (loopConfig) => {
             const fullConfig = {

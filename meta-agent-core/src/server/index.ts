@@ -154,9 +154,10 @@ app.post('/run', async (req: Request, res: Response) => {
       };
 
       // L0.5: 自动加载 AGENT.md 作为静态上下文
-      // 读取工作目录下的 AGENT.md（如果存在），并注入到 LLMCall
-      // 遵循 agent-design-principles-v2.md 核心层 3：静态上下文注入
-      const agentMdPath = path.join(workDir, 'AGENT.md');
+      // 读取工作目录下的 .agent/AGENT.md（如果存在），并注入到 LLMCall
+      // 遵循 agent-design-principles-merged.md 核心层 3：静态上下文注入
+      // 注意：根据 change.md 修改，AGENT.md 已移至 .agent/ 目录
+      const agentMdPath = path.join(workDir, '.agent', 'AGENT.md');
       let agentMdContent: string | undefined;
       try {
         const fs = await import('fs/promises');

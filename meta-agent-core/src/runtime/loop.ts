@@ -1,11 +1,11 @@
 // [编排层 / 循环] runtime/loop.ts — Loop 骨架 + LoopHooks 接口 + 终止条件
 
-import { collect, type CollectConfig } from '../core/collect';
+import { collect, type CollectConfig, type CollectSource } from '../core/collect';
 import { LLMCall } from '../core/llm';
 import { Trace, TerminalLog, type OperationType } from '../core/trace';
 import { Memory } from '../core/memory';
 import { Harness } from './harness';
-import { canTransition, type AgentState, type Mode } from './state';
+import { canTransition, type AgentState, type Mode, type ArchivedSubgoal } from './state';
 import { InterruptChannel, type InterruptSignal, type UserDirective } from './interrupt';
 import { StateManager } from './state';
 import type { Primitives } from '../core/primitives';
@@ -139,7 +139,7 @@ export async function runLoop(
       
       // 任务终止时更新 Memory 的 solutionSummary
       const summary = `任务未完成（迭代次数超限，已完成 ${state.archivedSubgoals.length} 个子目标）`;
-      deps.memory.updateLastEntry(summary);
+      deps.memory.updateLastEntry(summary, state.archivedSubgoals);
       
       await config.onStop?.(state);
       // 保存状态再返回
@@ -153,7 +153,7 @@ export async function runLoop(
       
       // 任务终止时更新 Memory 的 solutionSummary
       const summary = `任务未能完成（连续无增益，已完成 ${state.archivedSubgoals.length} 个子目标）`;
-      deps.memory.updateLastEntry(summary);
+      deps.memory.updateLastEntry(summary, state.archivedSubgoals);
       
       await config.onEscalate?.(reason, state);
       // 保存状态再返回
@@ -166,10 +166,11 @@ export async function runLoop(
       deps.trace.append({ ts: Date.now(), kind: 'stop', data: { reason: 'goal_completed' } });
       
       // 任务完成时更新 Memory 的 solutionSummary
+      const completedGoals = state.archivedSubgoals.map(s => s.goal).join(', ');
       const summary = state.archivedSubgoals.length > 0
-        ? `已完成 ${state.archivedSubgoals.length} 个子目标: ${state.archivedSubgoals.join(', ')}`
+        ? `已完成 ${state.archivedSubgoals.length} 个子目标: ${completedGoals}`
         : '任务已完成（无子目标）';
-      deps.memory.updateLastEntry(summary);
+      deps.memory.updateLastEntry(summary, state.archivedSubgoals);
       
       await config.onStop?.(state);
       // 保存状态再返回
@@ -185,7 +186,7 @@ export async function runLoop(
       deps.skillsDir,  // 传递 skills 目录路径
     );
     
-    // 记录 Collect 到 TerminalLog
+    // 记录 Collect 到 TerminalLog 和 Trace
     const { content: truncatedContext, truncated } = truncateOutput(collectResult.context);
     deps.terminalLog.append({
       ts: Date.now(),
@@ -195,10 +196,13 @@ export async function runLoop(
       truncated,
     });
     
+    // 根据 change.md：Collect 补完整记录
     deps.trace.append({
       ts: Date.now(),
       kind: 'collect',
-      data: { sources: config.collectConfig.sources.map(s => s.query) },
+      data: { sources: config.collectConfig.sources.map((s: CollectSource) => s.query) },
+      input: JSON.stringify(config.collectConfig.sources),  // 补齐 input
+      output: truncatedContext,  // 补齐 output
       confidence: collectResult.confidence,
     });
 
@@ -217,7 +221,7 @@ export async function runLoop(
         deps.skillsDir,
       );
       
-      // 记录补采集到 TerminalLog
+      // 记录补采集到 TerminalLog 和 Trace
       const { content: truncatedContext, truncated } = truncateOutput(collectResult.context);
       deps.terminalLog.append({
         ts: Date.now(),
@@ -227,10 +231,13 @@ export async function runLoop(
         truncated,
       });
       
+      // 根据 change.md：Collect 补完整记录
       deps.trace.append({
         ts: Date.now(),
         kind: 'collect',
         data: { retry: collectRetry },
+        input: JSON.stringify(config.collectConfig.sources),  // 补齐 input
+        output: truncatedContext,  // 补齐 output
         confidence: collectResult.confidence,
       });
     }
@@ -273,10 +280,13 @@ export async function runLoop(
       const uncertaintyScore = reasonResult.uncertainty?.score ?? 0.8;
       const uncertaintyReasons = reasonResult.uncertainty?.reasons ?? ['uncertainty undefined'];
       
+      // 根据 change.md：LLMCall[Reason] 补完整记录
       deps.trace.append({
         ts: Date.now(),
         kind: 'reason',
         data: { task: taskDesc, result: reasonResult.result },
+        input: llmInput,  // 补齐 input
+        output: truncatedOutput,  // 补齐 output
         uncertainty: { score: uncertaintyScore, reasons: uncertaintyReasons },
       });
 
@@ -295,10 +305,13 @@ export async function runLoop(
           truncated,
         });
         
+        // 根据 change.md：LLMCall[ReasonMulti] 补完整记录
         deps.trace.append({
           ts: Date.now(),
           kind: 'reason',
           data: { multi: true, candidates: multi.candidates },
+          input: llmInput,  // 补齐 input
+          output: truncatedOutput,  // 补齐 output
           uncertainty: multi.uncertainty,
         });
 
@@ -324,10 +337,14 @@ export async function runLoop(
           truncated: truncated2,
         });
         
+        // 根据 change.md：Judge 调用补齐 judge_type 字段
         deps.trace.append({
           ts: Date.now(),
           kind: 'judge',
+          judge_type: 'selection',  // 补齐 judge_type
           data: { type: 'selection', decision: selResult.result },
+          input: selectionInput,  // 补齐 input
+          output: truncatedOutput2,  // 补齐 output
           uncertainty: selResult.uncertainty,
         });
         state.custom['pendingProposal'] = selResult.result;
@@ -349,10 +366,14 @@ export async function runLoop(
         truncated: truncated3,
       });
       
+      // 根据 change.md：Judge 调用补齐 judge_type 字段
       deps.trace.append({
         ts: Date.now(),
         kind: 'judge',
+        judge_type: 'risk',  // 补齐 judge_type
         data: { type: 'risk', decision: riskResult.result },
+        input: riskInput,  // 补齐 input
+        output: truncatedOutput3,  // 补齐 output
         uncertainty: riskResult.uncertainty,
       });
 
@@ -445,10 +466,14 @@ export async function runLoop(
         truncated,
       });
       
+      // 根据 change.md：Judge 调用补齐 judge_type 字段
       deps.trace.append({
         ts: Date.now(),
         kind: 'judge',
+        judge_type: 'outcome',  // 补齐 judge_type
         data: { type: 'outcome', decision: outcomeResult.result },
+        input: outcomeInput,  // 补齐 input
+        output: truncatedOutput,  // 补齐 output
         uncertainty: outcomeResult.uncertainty,
       });
 
@@ -483,7 +508,13 @@ export async function runLoop(
           },
         });
         
-        state.archivedSubgoals.push(state.currentSubgoal);
+        // 添加到 archivedSubgoals，包含结论和完成状态
+        const archivedSubgoal: ArchivedSubgoal = {
+          goal: state.currentSubgoal,
+          summary: String(state.custom['pendingProposal'] ?? '').slice(0, 500),
+          outcome: 'completed',
+        };
+        state.archivedSubgoals.push(archivedSubgoal);
         state.subgoals = state.subgoals.filter(g => g !== state.currentSubgoal);
         state.currentSubgoal = state.subgoals[0] ?? null;
       }
