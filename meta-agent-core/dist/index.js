@@ -53,10 +53,8 @@ function parseStrategiesConfig(agentMdContent) {
         error_classifier: 'enabled',
         judge: {
             outcome: 'required',
-            risk: 'enabled',
             milestone: 'enabled',
             capability: 'enabled',
-            selection: 'disabled',
         },
     };
     if (!agentMdContent) {
@@ -137,26 +135,18 @@ function parseStrategiesConfig(agentMdContent) {
         const judgeContent = judgeBlockMatch[1];
         const defaultJudge = {
             outcome: 'required',
-            risk: 'enabled',
             milestone: 'enabled',
             capability: 'enabled',
-            selection: 'disabled',
         };
         const outcomeMatch = judgeContent.match(/outcome:\s*(required|rule_based|disabled)/i);
         if (outcomeMatch)
             defaultJudge.outcome = outcomeMatch[1];
-        const riskMatch = judgeContent.match(/risk:\s*(enabled|disabled)/i);
-        if (riskMatch)
-            defaultJudge.risk = riskMatch[1];
         const milestoneMatch = judgeContent.match(/milestone:\s*(enabled|disabled)/i);
         if (milestoneMatch)
             defaultJudge.milestone = milestoneMatch[1];
         const capabilityMatch = judgeContent.match(/capability:\s*(enabled|disabled)/i);
         if (capabilityMatch)
             defaultJudge.capability = capabilityMatch[1];
-        const selectionMatch = judgeContent.match(/selection:\s*(enabled|disabled)/i);
-        if (selectionMatch)
-            defaultJudge.selection = selectionMatch[1];
         config.judge = defaultJudge;
     }
     return config;

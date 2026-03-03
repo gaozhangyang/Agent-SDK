@@ -36,10 +36,8 @@ export interface AgentStrategiesConfig {
     error_classifier?: 'enabled' | 'disabled';
     judge?: {
         outcome?: 'required' | 'rule_based' | 'disabled';
-        risk?: 'enabled' | 'disabled';
         milestone?: 'enabled' | 'disabled';
         capability?: 'enabled' | 'disabled';
-        selection?: 'enabled' | 'disabled';
     };
 }
 /**

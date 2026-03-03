@@ -20,7 +20,7 @@ export type Uncertainty = {
 export type TraceEntry = {
   ts: number;
   seq?: number;           // 全局自增序号（可选，由 append 方法自动分配）
-  kind: 'collect' | 'reason' | 'judge' | 'exec' | 'observe' |
+  kind: 'collect' | 'reason' | 'judge' | 'exec' |
         'state' | 'escalate' | 'stop' | 'interrupt' | 'narrative';
   data: unknown;
   confidence?: Confidence;
@@ -28,7 +28,7 @@ export type TraceEntry = {
   terminal_seq?: number; // 关联的 TerminalLog 序号（exec 类型时填写）
   tags?: string[];
   // 扩展字段：补齐 change.md 要求的字段
-  judge_type?: string;   // Judge 调用的类型：outcome, risk, selection, milestone, capability
+  judge_type?: string;   // Judge 调用的类型：outcome, milestone, capability
   operation?: string;   // 原子操作类型：read, write, edit, bash
   input?: string;       // 输入内容
   output?: string;      // 输出内容

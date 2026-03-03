@@ -11,7 +11,7 @@ export type Uncertainty = {
 export type TraceEntry = {
     ts: number;
     seq?: number;
-    kind: 'collect' | 'reason' | 'judge' | 'exec' | 'observe' | 'state' | 'escalate' | 'stop' | 'interrupt' | 'narrative';
+    kind: 'collect' | 'reason' | 'judge' | 'exec' | 'state' | 'escalate' | 'stop' | 'interrupt' | 'narrative';
     data: unknown;
     confidence?: Confidence;
     uncertainty?: Uncertainty;

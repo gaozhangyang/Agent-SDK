@@ -50,10 +50,8 @@ export interface AgentStrategiesConfig {
   error_classifier?: 'enabled' | 'disabled';
   judge?: {
     outcome?: 'required' | 'rule_based' | 'disabled';
-    risk?: 'enabled' | 'disabled';
     milestone?: 'enabled' | 'disabled';
     capability?: 'enabled' | 'disabled';
-    selection?: 'enabled' | 'disabled';
   };
 }
 
@@ -73,10 +71,8 @@ export function parseStrategiesConfig(agentMdContent?: string): AgentStrategiesC
     error_classifier: 'enabled',
     judge: {
       outcome: 'required',
-      risk: 'enabled',
       milestone: 'enabled',
       capability: 'enabled',
-      selection: 'disabled',
     },
   };
   
@@ -165,26 +161,18 @@ export function parseStrategiesConfig(agentMdContent?: string): AgentStrategiesC
     const judgeContent = judgeBlockMatch[1];
     const defaultJudge: AgentStrategiesConfig['judge'] = {
       outcome: 'required',
-      risk: 'enabled',
       milestone: 'enabled',
       capability: 'enabled',
-      selection: 'disabled',
     };
     
     const outcomeMatch = judgeContent.match(/outcome:\s*(required|rule_based|disabled)/i);
     if (outcomeMatch) defaultJudge.outcome = outcomeMatch[1] as 'required' | 'rule_based' | 'disabled';
-    
-    const riskMatch = judgeContent.match(/risk:\s*(enabled|disabled)/i);
-    if (riskMatch) defaultJudge.risk = riskMatch[1] as 'enabled' | 'disabled';
     
     const milestoneMatch = judgeContent.match(/milestone:\s*(enabled|disabled)/i);
     if (milestoneMatch) defaultJudge.milestone = milestoneMatch[1] as 'enabled' | 'disabled';
     
     const capabilityMatch = judgeContent.match(/capability:\s*(enabled|disabled)/i);
     if (capabilityMatch) defaultJudge.capability = capabilityMatch[1] as 'enabled' | 'disabled';
-    
-    const selectionMatch = judgeContent.match(/selection:\s*(enabled|disabled)/i);
-    if (selectionMatch) defaultJudge.selection = selectionMatch[1] as 'enabled' | 'disabled';
     
     config.judge = defaultJudge;
   }

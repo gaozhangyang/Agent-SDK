@@ -1,5 +1,5 @@
 import type { Uncertainty } from './trace';
-export type JudgeType = 'outcome' | 'risk' | 'selection' | 'milestone' | 'capability';
+export type JudgeType = 'outcome' | 'milestone' | 'capability';
 export type LLMCallResult = {
     result: string;
     uncertainty: Uncertainty;

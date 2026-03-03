@@ -77,19 +77,6 @@ async function executeToolCalls(proposal, primitives) {
     return results.join('\n\n');
 }
 /**
- * 检查 Reason 输出是否包含有效的工具调用
- * 根据 change.md 问题：当 Reason 输出包含工具调用时，应该优先执行工具调用
- * 而不是因为 uncertainty 高就直接 Escalate
- *
- * @param result Reason 输出的文本
- * @returns true if the result contains valid tool calls
- */
-function hasToolCalls(result) {
-    // 检查是否包含 <invoke name="X"> 格式的工具调用
-    const toolCallRegex = /<invoke name="(\w+)">/;
-    return toolCallRegex.test(result);
-}
-/**
  * 截断过长的输出，并在末尾标记
  */
 function truncateOutput(output) {
@@ -339,8 +326,8 @@ async function runLoop(state, config, deps, hooks) {
             // 根据 change.md 问题2：实际执行工具调用
             // 解析并执行 LLM 返回的 <invoke name="X">...</invoke> 格式的工具调用
             const execResult = await executeToolCalls(proposal, deps.primitives);
-            // 将执行结果存储到 state 中，供 Review 模式使用
-            state.custom['lastExecResult'] = execResult;
+            // v2: 根据 change.md 修改6，将 lastExecResult 从 custom 迁移为顶层字段
+            state.lastExecResult = execResult;
             // 记录执行结果到 TerminalLog
             const { content: truncatedExecResult, truncated: execTruncated } = truncateOutput(execResult);
             const execSeq = deps.terminalLog.append({
@@ -368,8 +355,8 @@ async function runLoop(state, config, deps, hooks) {
         }
         // ── 6. [Review 模式] ───────────────────────────────────────────────────
         if (state.mode === 'review') {
-            // 根据 change.md 问题2：将执行结果包含在 Review 的输入中
-            const execResult = String(state.custom['lastExecResult'] ?? '[No execution result]');
+            // v2: 根据 change.md 修改6，将 lastExecResult 从 custom 迁移为顶层字段
+            const execResult = String(state.lastExecResult ?? '[No execution result]');
             // v2: 使用强类型字段 pendingProposal
             const outcomeInput = `目标: ${state.currentSubgoal ?? state.goal}\n执行提案: ${state.pendingProposal ?? ''}\n执行结果:\n${execResult}`;
             const outcomeResult = await deps.llm.judge('outcome', collectResult.context, outcomeInput);

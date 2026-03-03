@@ -137,11 +137,8 @@ export function localPrimitives(
     // 注意：Trace 的写入由 loop.ts 在更高层级统一处理
     // 但 primitives 层的操作也需要记录到 trace.jsonl，使用相同的 seq
     if (trace) {
-      // 根据操作类型确定 kind 字段
-      let kind: 'exec' | 'observe' = 'exec';
-      if (operation === 'read' || operation === 'bash') {
-        kind = 'observe';
-      }
+      // 根据 change.md 修改3：将 read 和 bash 操作的 kind 改为 'exec'
+      let kind: 'exec' = 'exec';
       
       trace.append({
         ts: Date.now(),
