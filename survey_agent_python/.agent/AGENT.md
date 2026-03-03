@@ -160,6 +160,7 @@ review   → plan       # 目标变化或需重新规划
   "maxOutputLength": 204800,
   "strategies": {
     "level": "L1",
+    "permissions": 3,
     "mode_fsm": "enabled",
     "permission_fsm": "enabled",
     "harness": "standard",
@@ -180,6 +181,7 @@ review   → plan       # 目标变化或需重新规划
 | 策略项 | 说明 | 可选值 |
 |--------|------|--------|
 | level | 基础策略包，决定默认启用范围 | L0, L1, L2, L3 |
+| permissions | 初始权限级别（0-4），定义 Agent 可执行的操作范围 | 0-4 |
 | mode_fsm | Mode 状态机（Plan/Execute/Review/Recovery/Paused） | enabled, disabled |
 | permission_fsm | 权限状态机（Level 0-4） | enabled, disabled |
 | harness | 快照策略 | standard, aggressive, disabled |
@@ -189,6 +191,18 @@ review   → plan       # 目标变化或需重新规划
 | judge.milestone | git commit 时机判断 | enabled, disabled |
 | judge.capability | 启动时能力边界声明 | enabled, disabled |
 | judge.selection | 多候选仲裁 | enabled, disabled |
+
+**权限级别说明：**
+
+| 级别 | 名称 | 允许的操作 |
+|------|------|-----------|
+| 0 | 只读 | read |
+| 1 | 受控写 | write/edit（限工作区） |
+| 2 | 受控执行 | bash（常规命令，无网络/删除） |
+| 3 | 高风险执行 | bash（网络、删除、系统级变更） |
+| 4 | 自主模式 | 预授权范围内自动执行 |
+
+> Survey Agent 需要从 arXiv API 获取论文，因此需要权限级别 3。
 
 ---
 

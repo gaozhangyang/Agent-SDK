@@ -43,6 +43,7 @@ export { createErrorClassifier };
  */
 export interface AgentStrategiesConfig {
   level?: 'L0' | 'L1' | 'L2' | 'L3';
+  permissions?: PermissionLevel;  // 权限级别：0-4
   mode_fsm?: 'enabled' | 'disabled';
   permission_fsm?: 'enabled' | 'disabled';
   harness?: 'standard' | 'aggressive' | 'disabled';
@@ -65,6 +66,7 @@ export interface AgentStrategiesConfig {
 export function parseStrategiesConfig(agentMdContent?: string): AgentStrategiesConfig {
   const defaultConfig: AgentStrategiesConfig = {
     level: 'L1',
+    permissions: 2,  // 默认权限级别：受控执行（常规 bash 命令）
     mode_fsm: 'enabled',
     permission_fsm: 'enabled',
     harness: 'standard',
@@ -91,6 +93,9 @@ export function parseStrategiesConfig(agentMdContent?: string): AgentStrategiesC
       const config: AgentStrategiesConfig = { ...defaultConfig };
       
       if (parsed.level) config.level = parsed.level;
+      if (typeof parsed.permissions === 'number' && parsed.permissions >= 0 && parsed.permissions <= 4) {
+        config.permissions = parsed.permissions;
+      }
       if (parsed.mode_fsm) config.mode_fsm = parsed.mode_fsm;
       if (parsed.permission_fsm) config.permission_fsm = parsed.permission_fsm;
       if (parsed.harness) config.harness = parsed.harness;
@@ -119,6 +124,15 @@ export function parseStrategiesConfig(agentMdContent?: string): AgentStrategiesC
   const levelMatch = strategiesContent.match(/level:\s*(L\d+)/i);
   if (levelMatch) {
     config.level = levelMatch[1] as AgentStrategiesConfig['level'];
+  }
+  
+  // 解析 permissions
+  const permissionsMatch = strategiesContent.match(/permissions:\s*(\d+)/i);
+  if (permissionsMatch) {
+    const permLevel = parseInt(permissionsMatch[1], 10);
+    if (permLevel >= 0 && permLevel <= 4) {
+      config.permissions = permLevel as PermissionLevel;
+    }
   }
   
   // 解析 mode_fsm

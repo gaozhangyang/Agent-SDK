@@ -9,6 +9,7 @@ import fetch from 'node-fetch';
 import express, { Request, Response } from 'express';
 import {
   createMetaAgent,
+  parseStrategiesConfig,
   type LLMProvider,
   type LoopResult,
   type AgentState,
@@ -181,6 +182,10 @@ app.post('/run', async (req: Request, res: Response) => {
         console.log(`[L0.5] AGENT.md 不存在，跳过自动加载`);
       }
 
+      // 从 AGENT.md 解析策略层配置（包括 permissions）
+      const strategiesConfig = parseStrategiesConfig(agentMdContent);
+      const permissions = strategiesConfig.permissions ?? 3;  // 默认权限级别 3（高风险执行，支持网络访问）
+
       // 查找 skills 目录
       const skillsDir = path.join(workDir, 'skills');
 
@@ -190,7 +195,7 @@ app.post('/run', async (req: Request, res: Response) => {
         goal,
         provider,
         {
-          permissions: 3,  // 默认权限级别（Survey Agent 需要网络访问）
+          permissions,  // 从 AGENT.md 的运行时配置读取权限级别
           subgoals: subgoals.length > 0 ? subgoals : [goal],
           logToFile: true,  // 始终保存 Trace、Terminal Log、Memory 到 .agent/ 目录
           collectConfig: resolvedCollectConfig,

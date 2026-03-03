@@ -345,13 +345,14 @@ Session 启动时自动读取 `{workDir}/.agent/AGENT.md`（根据 change.md 修
 
 **AGENT.md 运行时配置格式：**
 
-根据 change.md 要求，所有运行时配置均写在 md 文件里的 ```json 代码块中：
+所有运行时配置均写在 md 文件里的 ```json 代码块中：
 
 ```json
 {
   "maxOutputLength": 204800,
   "strategies": {
     "level": "L1",
+    "permissions": 3,
     "mode_fsm": "enabled",
     "permission_fsm": "enabled",
     "harness": "standard",
@@ -371,6 +372,7 @@ Session 启动时自动读取 `{workDir}/.agent/AGENT.md`（根据 change.md 修
 |--------|------|--------|
 | maxOutputLength | Terminal Log 输出截断长度（字节） | 102400 (100KB) |
 | strategies.level | 基础策略包，决定默认启用范围 | L1 |
+| strategies.permissions | 初始权限级别（0-4），定义 Agent 可执行的操作范围 | 2 |
 | strategies.mode_fsm | Mode 状态机（Plan/Execute/Review/Recovery/Paused） | enabled |
 | strategies.permission_fsm | 权限状态机（Level 0-4） | enabled |
 | strategies.harness | 快照策略 | standard |
@@ -380,6 +382,16 @@ Session 启动时自动读取 `{workDir}/.agent/AGENT.md`（根据 change.md 修
 | strategies.judge.milestone | git commit 时机 | enabled |
 | strategies.judge.capability | 启动时能力边界声明 | enabled |
 | strategies.judge.selection | 多候选仲裁 | disabled |
+
+**权限级别说明：**
+
+| 级别 | 名称 | 允许的操作 |
+|------|------|-----------|
+| 0 | 只读 | read |
+| 1 | 受控写 | write/edit（限工作区） |
+| 2 | 受控执行 | bash（常规命令，无网络/删除） |
+| 3 | 高风险执行 | bash（网络、删除、系统级变更） |
+| 4 | 自主模式 | 预授权范围内自动执行 |
 
 说明：
 - `judge.outcome` 是唯一不建议 `disabled` 的项，降级选项是 `rule_based`（规则匹配替代 LLMCall）

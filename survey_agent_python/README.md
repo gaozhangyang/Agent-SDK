@@ -103,7 +103,7 @@ python run.py
 
 ### 配置修改
 
-所有运行时配置（包括 topics 主题列表、抓取参数等）都在 `.agent/AGENT.md` 的「运行时配置」块中维护。
+所有运行时配置（包括 topics 主题列表、抓取参数、权限级别等）都在 `.agent/AGENT.md` 的「运行时配置」块中维护。
 
 修改主题配置：
 
@@ -117,6 +117,16 @@ python run.py
       "min_relevance_score": 0.7
     }
   ]
+}
+```
+
+修改权限配置（定义 Agent 可执行的操作范围）：
+
+```json
+{
+  "strategies": {
+    "permissions": 3
+  }
 }
 ```
 
