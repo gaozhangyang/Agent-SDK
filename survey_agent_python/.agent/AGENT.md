@@ -17,12 +17,11 @@
 
 ```
 survey_agent_python/
-├── .agent/                    # 运行时日志
-│   ├── state.json            # State 快照
-│   ├── trace.jsonl           # 推理轨迹（JSON 格式）
-│   ├── terminal.md          # 终端执行日志（Markdown 格式）
-│   └── memory.jsonl          # 长期记忆
-├── AGENT.md                  # 静态上下文（团队共享）
+├── .agent/                    # 运行时状态与配置
+│   ├── AGENT.md              # 静态上下文（定义 Survey Workflow 及运行时配置）
+│   ├── state.json            # State 快照（首次运行后生成）
+│   ├── trace.jsonl           # 推理轨迹（首次运行后生成）
+│   └── terminal.md           # Terminal Log（首次运行后生成）
 ├── skills/                   # 技能目录（每个技能一个文件夹）
 │   ├── arxiv_api/           # arXiv API 抓取技能
 │   │   ├── SKILL.md         # 技能说明文档
@@ -35,22 +34,14 @@ survey_agent_python/
 │   └── pdf_extract/         # PDF 解析技能
 │       ├── SKILL.md         # 技能说明文档
 │       └── extract_text.py  # PDF 文本提取脚本
-├── sdk_client.py             # meta-agent-core SDK Python 封装
-├── scripts/                  # 工具脚本
-│   └── download_pdf.py      # PDF 下载
-├── templates/                # 模板目录
-│   └── paper_summary.md     # 论文总结模板
-├── knowledge_base/           # 知识板块目录
-│   └── {topic}/
-│       ├── meta.json         # 板块元信息
-│       └── paper_*.md        # 论文总结
-├── data/                    # 运行时数据
-│   ├── raw_papers_*.json    # 原始抓取数据
-│   └── selected_*.json      # 筛选后数据
-├── api_server.py            # FastAPI Web 服务器
-└── config/
-    └── user_config.json     # 用户配置
+├── run.py                    # 入口脚本（执行 python run.py）
+└── README.md                 # 项目说明
 ```
+
+> **注意**：以下目录在运行时会自动创建或使用（无需初始化包含）：
+> - `data/` - 运行时数据（原始论文、筛选结果、PDF 等）
+> - `knowledge_base/` - 知识板块目录
+> - `templates/` - 模板目录
 
 ## Collect 检索配置
 
@@ -130,16 +121,42 @@ review   → plan       # 目标变化或需重新规划
 
 ## 运行时配置
 
-以下配置可在 AGENT.md 中定义：
+以下配置在 AGENT.md 中定义，**apiKey 可通过环境变量覆盖**（如 `LLM_API_KEY`）：
 
-| 配置项 | 说明 | 默认值 |
-|--------|------|--------|
-| maxOutputLength | Terminal Log 输出截断长度（字节） | 102400 (100KB) |
-
-配置示例（```json 格式）：
+### 运行参数配置
 
 ```json
 {
+  "llm": {
+    "baseUrl": "http://35.220.164.252:3888/v1",
+    "model": "MiniMax-M2.5",
+    "apiKey": ""
+  },
+  "sdk_url": "http://127.0.0.1:3890",
+  "fetch_max_papers": 10,
+  "screening_threshold": 0.6,
+  "pdf_download_dir": "data/pdfs",
+  "debug": false,
+  "topics": [
+    {
+      "name": "Computer_Vision",
+      "keywords": ["video generation", "diffusion", "video synthesis", "long video", "image generation", "image editing"],
+      "arxiv_categories": ["cs.CV"],
+      "min_relevance_score": 0.6
+    },
+    {
+      "name": "NLP_and_LLM",
+      "keywords": ["language model", "LLM", "transformer", "attention", "large language model", "text generation"],
+      "arxiv_categories": ["cs.CL", "cs.LG"],
+      "min_relevance_score": 0.6
+    },
+    {
+      "name": "Reinforcement_Learning",
+      "keywords": ["reinforcement learning", "RL", "policy", "reward", "agent"],
+      "arxiv_categories": ["cs.LG", "cs.AI"],
+      "min_relevance_score": 0.5
+    }
+  ],
   "maxOutputLength": 204800,
   "strategies": {
     "level": "L1",
@@ -195,7 +212,7 @@ review   → plan       # 目标变化或需重新规划
 
 **配置来源**：
 - 优先参考 `skills/arxiv_api/SKILL.md`
-- 从 `config/user_config.json` 中读取 topics 的 `arxiv_categories` 和调用参数
+- 从本 AGENT.md 的「运行时配置」中读取 `fetch_max_papers` 和 topics 的 `arxiv_categories`
 
 **调用参数**：
 - `categories`: arXiv 分类列表（如 `cs.CV`, `cs.LG`）
@@ -218,7 +235,7 @@ python skills/arxiv_api/fetch_arxiv.py -c cs.CV,cs.LG -m 10 -o data/raw_papers_2
 
 **配置来源**：
 - 优先参考 `skills/screening/SKILL.md`
-- 读取 `config/user_config.json`
+- 从本 AGENT.md 的「运行时配置」中读取 topics 和 screening_threshold
 - 读取 `knowledge_base/{topic}/meta.json`
 - 读取 `data/blacklist.json`
 
@@ -232,7 +249,6 @@ python skills/arxiv_api/fetch_arxiv.py -c cs.CV,cs.LG -m 10 -o data/raw_papers_2
 **调用方式**：
 ```bash
 python skills/screening/screen_papers.py data/raw_papers_2026-03-03.json data/selected_papers_2026-03-03.json \
-  --config config/user_config.json \
   --topics knowledge_base \
   --blacklist data/blacklist.json
 ```

@@ -1,9 +1,0 @@
-{
-  "name": "Computer_Vision",
-  "description": "计算机视觉相关论文，包括图像/视频生成、编辑、分割等",
-  "keywords": ["video generation", "diffusion", "video synthesis", "long video", "image generation", "image editing"],
-  "arxiv_categories": ["cs.CV"],
-  "paper_count": 0,
-  "updated_at": "",
-  "min_relevance_score": 0.6
-}

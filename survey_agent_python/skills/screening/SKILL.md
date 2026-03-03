@@ -99,7 +99,7 @@ print(f"筛选出 {len(selected)} 篇论文")
 
 ## 用户配置格式
 
-`config/user_config.json`：
+配置从 AGENT.md 的「运行时配置」中读取，格式如下：
 
 ```json
 {
@@ -117,8 +117,7 @@ print(f"筛选出 {len(selected)} 篇论文")
       "min_relevance_score": 0.6
     }
   ],
-  "daily_limit": 20,
-  "blacklist": "data/blacklist.json"
+  "screening_threshold": 0.6
 }
 ```
 

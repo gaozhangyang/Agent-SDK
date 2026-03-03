@@ -1,9 +1,0 @@
-{
-  "name": "NLP_and_LLM",
-  "description": "自然语言处理和大语言模型相关论文",
-  "keywords": ["language model", "LLM", "transformer", "attention", "large language model", "text generation"],
-  "arxiv_categories": ["cs.CL", "cs.LG"],
-  "paper_count": 0,
-  "updated_at": "",
-  "min_relevance_score": 0.6
-}
