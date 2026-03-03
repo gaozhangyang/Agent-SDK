@@ -130,7 +130,7 @@ review   → plan       # 目标变化或需重新规划
   "llm": {
     "baseUrl": "http://35.220.164.252:3888/v1",
     "model": "MiniMax-M2.5",
-    "apiKey": ""
+    "apiKey": "${LLM_API_KEY}"
   },
   "sdk_url": "http://127.0.0.1:3890",
   "fetch_max_papers": 10,

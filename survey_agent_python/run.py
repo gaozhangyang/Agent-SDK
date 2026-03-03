@@ -174,6 +174,7 @@ def run_agent(
             "maxNoProgress": 10,
         },
         "debug": args.debug or config.get("debug", False),
+        "resume": False,  # 每次运行都使用新的 goal
     }
 
     # 添加可选参数覆盖

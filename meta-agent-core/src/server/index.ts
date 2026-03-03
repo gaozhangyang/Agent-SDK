@@ -96,7 +96,7 @@ app.post('/run', async (req: Request, res: Response) => {
       console.log('[DEBUG] Received run request:', {
         goal: goal.substring(0, 100),
         workDir,
-        sources: collectConfig.sources.map((s: CollectSource) => s.query),
+        sources: collectConfig.sources?.map((s: CollectSource) => s.query) || [],
         debug,
         resume,
       });
@@ -118,6 +118,20 @@ app.post('/run', async (req: Request, res: Response) => {
       }
     } else {
       // 创建新的 agent 实例
+      // 如果 resume=false，先清除旧的 state.json（强制使用新的 goal）
+      if (!resume) {
+        const fs = await import('fs/promises');
+        const oldStatePath = path.join(workDir, '.agent', 'state.json');
+        try {
+          await fs.unlink(oldStatePath);
+          if (debug) {
+            console.log('[DEBUG] Cleared old state for fresh start');
+          }
+        } catch {
+          // 文件不存在，忽略
+        }
+      }
+      
       const baseUrl = llmConfig.baseUrl.replace(/\/$/, '');
       const provider: LLMProvider = {
         async complete(system: string, user: string): Promise<string> {
@@ -146,7 +160,7 @@ app.post('/run', async (req: Request, res: Response) => {
       // file 类型且为相对路径时，解析为 workDir 下的绝对路径
       const resolvedCollectConfig: CollectConfig = {
         ...collectConfig,
-        sources: collectConfig.sources.map((s: CollectSource) =>
+        sources: (collectConfig.sources || []).map((s: CollectSource) =>
           s.type === 'file' && !path.isAbsolute(s.query)
             ? { ...s, query: path.join(workDir, s.query) }
             : s,
@@ -176,7 +190,7 @@ app.post('/run', async (req: Request, res: Response) => {
         goal,
         provider,
         {
-          permissions: 2,  // 默认权限级别
+          permissions: 3,  // 默认权限级别（Survey Agent 需要网络访问）
           subgoals: subgoals.length > 0 ? subgoals : [goal],
           logToFile: true,  // 始终保存 Trace、Terminal Log、Memory 到 .agent/ 目录
           collectConfig: resolvedCollectConfig,
@@ -225,7 +239,8 @@ app.post('/run', async (req: Request, res: Response) => {
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    console.error('[SDK Error]', message);
+    const stack = err instanceof Error ? err.stack : '';
+    console.error('[SDK Error]', message, stack);
     res.status(500).json({ status: 'error', reason: message });
   }
 });
