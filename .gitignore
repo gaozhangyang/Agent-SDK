@@ -9,3 +9,4 @@ data
 **/state.json
 **/trace.jsonl
 **/terminal.md
+**/memory.jsonl
