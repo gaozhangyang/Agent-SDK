@@ -179,7 +179,8 @@ describe('Loop', () => {
     const result = await runLoop(state, config, deps, hooks);
     
     expect(result.status).toBe('escalated');
-    expect((result as any).reason).toContain('快照');
+    // 根据 change.md 修改7，snapshot 失败的 reason 细化为 "snapshot_failed"
+    expect((result as any).reason).toContain('snapshot_failed');
   });
 
   test('onBeforeExec 返回 block 时返回 escalated', async () => {

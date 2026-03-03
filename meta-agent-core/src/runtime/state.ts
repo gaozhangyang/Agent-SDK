@@ -19,6 +19,7 @@ export type AgentState = {
   subgoals: string[];
   currentSubgoal: string | null;
   archivedSubgoals: ArchivedSubgoal[];  // v2 新增：已完成子目标，包含结论和结果
+  pendingProposal?: string;   // v2: Plan 阶段产出，Execute 阶段消费，Review 后清空
   mode: Mode;
   permissions: PermissionLevel;
   iterationCount: number;

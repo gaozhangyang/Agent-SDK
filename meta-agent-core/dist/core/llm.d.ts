@@ -3,6 +3,8 @@ export type JudgeType = 'outcome' | 'risk' | 'selection' | 'milestone' | 'capabi
 export type LLMCallResult = {
     result: string;
     uncertainty: Uncertainty;
+    riskApproved?: boolean;
+    riskReason?: string;
 };
 export type LLMCallMulti = {
     candidates: string[];
@@ -24,6 +26,7 @@ export declare class LLMCall {
     reasonMulti(context: string, input: string, n?: number): Promise<LLMCallMulti>;
     judge(type: JudgeType, context: string, input: string): Promise<LLMCallResult>;
     private parseWithUncertainty;
+    private parseWithUncertaintyAndRisk;
     /**
      * 提取 JSON 字符串
      * 沿用 v1 的正则：/{[\s\S]*}$/

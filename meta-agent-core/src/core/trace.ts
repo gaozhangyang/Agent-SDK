@@ -33,6 +33,9 @@ export type TraceEntry = {
   input?: string;       // 输入内容
   output?: string;      // 输出内容
   durationMs?: number; // 耗时
+  // v2: riskApproved 字段（reason 类型条目使用）
+  riskApproved?: boolean;
+  riskReason?: string;
 };
 
 // TerminalLog：执行终端，记录"做了什么"

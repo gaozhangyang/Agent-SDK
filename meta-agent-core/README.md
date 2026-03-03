@@ -120,13 +120,17 @@ type LoopHooks = {
 ### 核心层 2：推理引擎 LLMCall
 
 ```
-LLMCall(context, input) → { result, uncertainty{score, reasons} }
+LLMCall(context, input) → { result, uncertainty{score, reasons}, riskApproved?, riskReason? }
 ```
+
+> v2 修改：根据 change.md 修改2，Reason 输出增加了 `riskApproved` 和 `riskReason` 字段，由模型在 reason 时一并输出风险评估，不再需要独立的 Judge(risk) 调用。
 
 两种模式：
 
-- **Reason**：生成提案、写代码、制定计划。不确定性高时应生成多候选而非单一提案。
+- **Reason**：生成提案、写代码、制定计划。如果不确定，优先选择副作用最小的行动。不确定性高时不再生成多候选方案。
 - **Judge(type)**：收敛裁决，`type ∈ {outcome, risk, selection, milestone, capability}`。不确定性高时应 Escalate 而非执行。每次 Judge 调用必须显式指定 type。
+
+> v2 修改：根据 change.md 修改1，删除了 Judge(selection) 调用，不确定性由模型在 Reason 阶段自行处理。
 
 > outcome = 是否达成子目标；risk = 是否允许执行/权限是否满足；selection = 多候选方案中选哪一个；milestone = 当前完成点是否值得 git commit；capability = 任务是否在 agent 能力和权限范围内（启动时能力边界声明）。
 
@@ -150,6 +154,9 @@ type TraceEntry = {
   input?: string;       // 输入内容
   output?: string;      // 输出内容
   durationMs?: number; // 耗时
+  // v2: riskApproved 字段（reason 类型条目使用）
+  riskApproved?: boolean;
+  riskReason?: string;
 };
 
 // Terminal Log：终端——记录所有原子操作及其结果
@@ -246,14 +253,18 @@ MemoryEntry = {
 Collect(sources, filters, limits) → { context, confidence{coverage, reliability, gaps, by_source} }
 ```
 
+> v2 修改：Collect 降级为静态原语，不再包含重试逻辑。Collect 只做一件事——按 sources 配置机械地拉取原始内容，做基本 token 截断，返回 rawContext。
+
 `Collect` 是**编排协议**，不是原语。`coverage`（信息充分性）与 `reliability`（信息可信度）必须分开：
 
 ```
 coverage 高，reliability 高  → LLMCall[Reason]
-coverage 低，reliability 高  → 补充采集（再次 Collect，≤N 次）
+coverage 低，reliability 高  → Escalate（智能探索通过上层 SmartCollect 实现）
 coverage 高，reliability 低  → 刷新来源或 Escalate
 coverage 低，reliability 低  → 直接 Escalate
 ```
+
+> v2 修改：不再有补采集循环（≤N 次）。Collect 失败通常是环境或工具问题，重试无法解决。智能探索是 agent 行为，应在上层通过 SmartCollect 实现。
 
 **支持的 Source 类型：**
 
@@ -276,25 +287,30 @@ coverage 低，reliability 低  → 直接 Escalate
 │     LLMCall[Judge(capability)] → 完全可行 / 部分可行 / 不可行     │
 │                                                                  │
 │  1. Collect → { context, confidence }                            │
-│       ↓ 高置信度  ↓ 中（补采集，≤N次）  ↓ 低→Escalate            │
-│  2. LLMCall[Reason] → { proposal, uncertainty }                  │
-│       ↓ 低不确定性         ↓ 高→多候选或 Escalate                 │
+│       ↓ 高置信度  ↓ 低→Escalate                                  │
+│  2. LLMCall[Reason] → { proposal, uncertainty, riskApproved }   │
+│       ↓ riskApproved && 低不确定性  ↓ 否则→Escalate              │
 │  3. [Dry-run 验证]（高风险操作）                                  │
 │  4. Hook: onBeforeExec → proceed / block                         │
 │  5. 执行工具 [Harness 策略决定是否快照]                           │
 │     → Terminal Log 记录命令 + 输出                                │
 │  6. Observe：读取真实结果                                         │
-│  7. Hook: onAfterObserve → continue / recover / escalate         │
+│  7. Hook: onAfterObserve → continue / recover / escalate        │
 │  8. LLMCall[Judge(outcome)] → { verdict, uncertainty }           │
 │       ↓ 达成且不确定性低   ↓ 未达成或不确定性高→Recovery          │
 │  9. LLMCall[Judge(milestone)] → 是否提交 git                     │
 │  10. Update State，写入 narrative 摘要                            │
-│  11. Continue / Escalate / Stop                                  │
-│      ├── 目标已完成 → Stop                                       │
-│      ├── 连续无增益 → Escalate                                   │
-│      ├── 超出预算 → Stop                                         │
-│      └── 否则 → Continue                                         │
+│  11. Continue / Escalate / Stop                                   │
+│      ├── 目标已完成 → Stop                                        │
+│      ├── 连续无增益 → Escalate                                    │
+│      ├── 超出预算 → Stop                                          │
+│      └── 否则 → Continue                                          │
 └──────────────────────────────────────────────────────────────────┘
+```
+
+> v2 修改：
+> - 根据 change.md 修改1和2：删除了 reasonMulti + Judge(selection) 分支，将风险评估合并到 Reason 输出（riskApproved 字段）
+> - 根据 change.md 修改3：删除了补采集循环
 ```
 
 终止条件是一等概念，不是循环的附属品。
@@ -321,6 +337,7 @@ type AgentState = {
   subgoals: string[];
   currentSubgoal: string | null;
   archivedSubgoals: ArchivedSubgoal[];  // 已完成子目标，包含结论和结果
+  pendingProposal?: string;   // v2: Plan 阶段产出，Execute 阶段消费，Review 后清空
   mode: Mode;
   permissions: PermissionLevel;
   iterationCount: number;
@@ -330,7 +347,11 @@ type AgentState = {
 };
 ```
 
+> v2 修改：根据 change.md 修改4，将 `state.custom['pendingProposal']` 改为强类型字段 `state.pendingProposal`。
+
 ### Harness 约定（骨架）
+
+> v2 修改：根据 change.md 修改7，snapshot 失败的 escalate reason 细化为 `snapshot_failed`，包含可能的错误原因（磁盘满、权限不足、Harness 配置错误）。
 
 三条硬性规则：
 1. **快照失败默认阻断副作用执行**（降级模式需显式声明并记录到 Trace）

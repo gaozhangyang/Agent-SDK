@@ -168,6 +168,10 @@ async function runLoop(state, config, deps, hooks) {
             }
         }
         // ── 2. [终止条件] 三个检查（目标完成 / 无增益超限 / 迭代超限）────────────
+        // noProgressCount 在 Review 阶段自增，但终止判断故意放在下一轮循环开头。
+        // 原因：Review 判断「没有进展」后会先切到 Recovery 执行回滚，
+        // 确保 escalate 时向上级交出干净的工作目录。
+        // 因此这里触发 escalate 时，Recovery 已经完成了清理工作。
         if (state.iterationCount >= t.maxIterations) {
             deps.trace.append({ ts: Date.now(), kind: 'stop', data: { reason: 'budget_exceeded' } });
             // 任务终止时更新 Memory 的 solutionSummary
@@ -224,33 +228,6 @@ async function runLoop(state, config, deps, hooks) {
             output: truncatedContext, // 补齐 output
             confidence: collectResult.confidence,
         });
-        // 补采集循环
-        let collectRetry = 0;
-        while (collectResult.confidence.coverage < t.confidenceMid &&
-            collectResult.confidence.reliability >= t.confidenceMid &&
-            collectRetry < t.maxCollectRetry) {
-            collectRetry++;
-            collectResult = await (0, collect_1.collect)(config.collectConfig, deps.primitives, (tag) => deps.trace.filterByTag(tag), deps.skillsDir);
-            // 记录补采集到 TerminalLog 和 Trace
-            const { content: truncatedContext, truncated } = truncateOutput(collectResult.context);
-            const retryCollectSeq = deps.terminalLog.append({
-                ts: Date.now(),
-                operation: 'collect',
-                input: JSON.stringify(config.collectConfig.sources),
-                output: truncatedContext,
-                truncated,
-            });
-            // 根据 change.md：Collect 补完整记录，使用与 terminalLog 相同的 seq
-            deps.trace.append({
-                ts: Date.now(),
-                seq: retryCollectSeq, // 使用 terminalLog 分配的相同 seq，确保一致性
-                kind: 'collect',
-                data: { retry: collectRetry },
-                input: JSON.stringify(config.collectConfig.sources), // 补齐 input
-                output: truncatedContext, // 补齐 output
-                confidence: collectResult.confidence,
-            });
-        }
         // confidence 低 → Escalate
         if (collectResult.confidence.coverage < t.confidenceLow ||
             collectResult.confidence.reliability < t.confidenceLow) {
@@ -283,6 +260,7 @@ async function runLoop(state, config, deps, hooks) {
             const uncertaintyScore = reasonResult.uncertainty?.score ?? 0.8;
             const uncertaintyReasons = reasonResult.uncertainty?.reasons ?? ['uncertainty undefined'];
             // 根据 change.md：LLMCall[Reason] 补完整记录，使用相同的 seq
+            // v2: 包含 riskApproved 和 riskReason
             deps.trace.append({
                 ts: Date.now(),
                 seq: llmcallSeq, // 使用 terminalLog 分配的相同 seq
@@ -291,122 +269,25 @@ async function runLoop(state, config, deps, hooks) {
                 input: llmInput, // 补齐 input
                 output: truncatedOutput, // 补齐 output
                 uncertainty: { score: uncertaintyScore, reasons: uncertaintyReasons },
+                // v2: 记录 riskApproved 到 trace
+                riskApproved: reasonResult.riskApproved,
+                riskReason: reasonResult.riskReason,
             });
-            // uncertainty 高 → 多候选或 Escalate
-            // 根据 change.md 问题：即使 uncertainty 高，如果原始 Reason 输出包含工具调用
-            // 也应该优先执行工具调用，而不是直接 Escalate
-            if (uncertaintyScore > t.uncertaintyHigh) {
-                // 检查原始 Reason 输出是否包含有效的工具调用
-                if (hasToolCalls(reasonResult.result)) {
-                    // 原始 Reason 输出包含工具调用，优先执行
-                    // 记录日志，说明虽然 uncertainty 高但仍然尝试执行工具调用
-                    console.log(`[Loop] Reason uncertainty=${uncertaintyScore.toFixed(2)} is high, but found tool calls in proposal, proceeding to execute`);
-                    deps.trace.append({
-                        ts: Date.now(),
-                        kind: 'narrative',
-                        data: {
-                            message: `Reason uncertainty=${uncertaintyScore.toFixed(2)} is high, but found tool calls in proposal, proceeding to execute`
-                        }
-                    });
-                    // 仍然将原始 Reason 输出存储到 pendingProposal，继续到 Execute 阶段
-                    state.custom['pendingProposal'] = reasonResult.result;
-                }
-                else {
-                    // 原始 Reason 输出没有工具调用，进入多候选分支
-                    // 记录 LLMCall reasonMulti 到 TerminalLog
-                    const llmInput = `Context:\n${collectResult.context}\n\nTask:\n${taskDesc}`;
-                    const multi = await deps.llm.reasonMulti(collectResult.context, taskDesc);
-                    const { content: truncatedOutput, truncated } = truncateOutput(JSON.stringify(multi.candidates));
-                    const reasonMultiSeq = deps.terminalLog.append({
-                        ts: Date.now(),
-                        operation: 'llmcall',
-                        input: llmInput,
-                        output: truncatedOutput,
-                        truncated,
-                    });
-                    // 根据 change.md：LLMCall[ReasonMulti] 补完整记录，使用相同的 seq
-                    deps.trace.append({
-                        ts: Date.now(),
-                        seq: reasonMultiSeq, // 使用 terminalLog 分配的相同 seq
-                        kind: 'reason',
-                        data: { multi: true, candidates: multi.candidates },
-                        input: llmInput, // 补齐 input
-                        output: truncatedOutput, // 补齐 output
-                        uncertainty: multi.uncertainty,
-                    });
-                    const multiUncertaintyScore = multi.uncertainty?.score ?? 0.8;
-                    if (multiUncertaintyScore > t.uncertaintyHigh) {
-                        const reason = `Reason 不确定性过高: ${multiUncertaintyScore.toFixed(2)}`;
-                        deps.trace.append({ ts: Date.now(), kind: 'escalate', data: { reason } });
-                        await config.onEscalate?.(reason, state);
-                        return { status: 'escalated', reason, state };
-                    }
-                    // 多候选 → Judge(selection) 仲裁
-                    // 记录 LLMCall judge(selection) 到 TerminalLog
-                    const selectionInput = JSON.stringify(multi.candidates);
-                    const selResult = await deps.llm.judge('selection', collectResult.context, selectionInput);
-                    const { content: truncatedOutput2, truncated: truncated2 } = truncateOutput(selResult.result);
-                    const selectionSeq = deps.terminalLog.append({
-                        ts: Date.now(),
-                        operation: 'llmcall',
-                        input: selectionInput,
-                        output: truncatedOutput2,
-                        truncated: truncated2,
-                    });
-                    // 根据 change.md：Judge 调用补齐 judge_type 字段，使用相同的 seq
-                    deps.trace.append({
-                        ts: Date.now(),
-                        seq: selectionSeq, // 使用 terminalLog 分配的相同 seq
-                        kind: 'judge',
-                        judge_type: 'selection', // 补齐 judge_type
-                        data: { type: 'selection', decision: selResult.result },
-                        input: selectionInput, // 补齐 input
-                        output: truncatedOutput2, // 补齐 output
-                        uncertainty: selResult.uncertainty,
-                    });
-                    state.custom['pendingProposal'] = selResult.result;
-                } // 结束 else (hasToolCalls 块)
-            }
-            else {
-                // uncertainty <= uncertaintyHigh，正常路径
-                state.custom['pendingProposal'] = reasonResult.result;
-            }
-            // ── Judge(risk) → 不通过时 Escalate ─────────────────────────────────
-            // 记录 LLMCall judge(risk) 到 TerminalLog
-            const riskInput = String(state.custom['pendingProposal']);
-            const riskResult = await deps.llm.judge('risk', collectResult.context, riskInput);
-            const { content: truncatedOutput3, truncated: truncated3 } = truncateOutput(riskResult.result);
-            const riskSeq = deps.terminalLog.append({
-                ts: Date.now(),
-                operation: 'llmcall',
-                input: riskInput,
-                output: truncatedOutput3,
-                truncated: truncated3,
-            });
-            // 根据 change.md：Judge 调用补齐 judge_type 字段，使用相同的 seq
-            deps.trace.append({
-                ts: Date.now(),
-                seq: riskSeq, // 使用 terminalLog 分配的相同 seq
-                kind: 'judge',
-                judge_type: 'risk', // 补齐 judge_type
-                data: { type: 'risk', decision: riskResult.result },
-                input: riskInput, // 补齐 input
-                output: truncatedOutput3, // 补齐 output
-                uncertainty: riskResult.uncertainty,
-            });
-            const riskApproved = riskResult.result.toLowerCase().includes('通过') ||
-                riskResult.result.toLowerCase().includes('pass') ||
-                riskResult.result.toLowerCase().includes('approved') ||
-                riskResult.result.toLowerCase().includes('yes') ||
-                riskResult.result.toLowerCase().includes('allow') || // 新增：允许执行
-                riskResult.result.toLowerCase().includes('允许');
-            const riskUncertaintyScore = riskResult.uncertainty?.score ?? 0.8;
-            if (!riskApproved || riskUncertaintyScore > t.uncertaintyHigh) {
-                const reason = `Judge(risk) 拒绝或不确定性过高: ${riskResult.result}`;
+            // v2: 根据 change.md 修改1，删除 reasonMulti + judge('selection') 分支
+            // 将不确定性推回模型侧处理，在 system prompt 中已添加指令
+            // v2: 根据 change.md 修改2，使用 reason 返回的 riskApproved 字段
+            // riskApproved === false 或 uncertainty.score > uncertaintyHigh → escalate
+            const riskApproved = reasonResult.riskApproved ?? true;
+            if (!riskApproved || uncertaintyScore > t.uncertaintyHigh) {
+                const reason = !riskApproved
+                    ? `Judge(risk) 拒绝: ${reasonResult.riskReason || '无风险说明'}`
+                    : `Reason 不确定性过高: ${uncertaintyScore.toFixed(2)}`;
                 deps.trace.append({ ts: Date.now(), kind: 'escalate', data: { reason } });
                 await config.onEscalate?.(reason, state);
                 return { status: 'escalated', reason, state };
             }
+            // v2: 将 pendingProposal 从 custom 改为强类型字段
+            state.pendingProposal = reasonResult.result;
             // 切换到 Execute（经 canTransition 校验）
             if ((0, state_1.canTransition)(state.mode, 'execute')) {
                 await hooks?.onModeTransition?.(state.mode, 'execute', state);
@@ -418,17 +299,29 @@ async function runLoop(state, config, deps, hooks) {
         }
         // ── 5. [Execute 模式] ───────────────────────────────────────────────────
         if (state.mode === 'execute') {
-            const proposal = String(state.custom['pendingProposal'] ?? '');
+            // v2: 使用强类型字段 pendingProposal
+            const proposal = state.pendingProposal ?? '';
             // shouldSnapshot Hook → 快照失败阻断
             const shouldSnapshot = hooks?.shouldSnapshot
                 ? await hooks.shouldSnapshot(state)
                 : false;
             if (shouldSnapshot) {
                 const snapshotOk = await deps.harness.snapshot(`iter-${state.iterationCount}`);
+                // v2: 根据 change.md 修改7，snapshot 失败的 escalate reason 细化
                 if (!snapshotOk) {
-                    deps.trace.append({ ts: Date.now(), kind: 'escalate', data: { reason: '快照失败，阻断执行' } });
-                    await config.onEscalate?.('快照失败', state);
-                    return { status: 'escalated', reason: '快照失败', state };
+                    const reason = 'snapshot_failed';
+                    deps.trace.append({
+                        ts: Date.now(),
+                        kind: 'escalate',
+                        data: {
+                            reason: 'snapshot_failed',
+                            message: 'Cannot proceed: snapshot failed before executing tool calls. ' +
+                                'Possible causes: disk full, permission denied, or Harness misconfiguration. ' +
+                                'Refusing to execute without rollback capability.'
+                        }
+                    });
+                    await config.onEscalate?.(reason, state);
+                    return { status: 'escalated', reason, state };
                 }
             }
             // onBeforeExec Hook → block 时 Escalate
@@ -477,8 +370,8 @@ async function runLoop(state, config, deps, hooks) {
         if (state.mode === 'review') {
             // 根据 change.md 问题2：将执行结果包含在 Review 的输入中
             const execResult = String(state.custom['lastExecResult'] ?? '[No execution result]');
-            // 记录 LLMCall judge(outcome) 到 TerminalLog
-            const outcomeInput = `目标: ${state.currentSubgoal ?? state.goal}\n执行提案: ${state.custom['pendingProposal']}\n执行结果:\n${execResult}`;
+            // v2: 使用强类型字段 pendingProposal
+            const outcomeInput = `目标: ${state.currentSubgoal ?? state.goal}\n执行提案: ${state.pendingProposal ?? ''}\n执行结果:\n${execResult}`;
             const outcomeResult = await deps.llm.judge('outcome', collectResult.context, outcomeInput);
             const { content: truncatedOutput, truncated } = truncateOutput(outcomeResult.result);
             const outcomeSeq = deps.terminalLog.append({
@@ -504,7 +397,10 @@ async function runLoop(state, config, deps, hooks) {
                 outcomeResult.result.toLowerCase().includes('yes');
             const outcomeUncertaintyScore = outcomeResult.uncertainty?.score ?? 0.8;
             if (!achieved || outcomeUncertaintyScore > t.uncertaintyHigh) {
+                // v2: 根据 change.md 修改6，在 Review 阶段 noProgressCount++ 处添加注释
                 state.noProgressCount++;
+                // 不在此处立即 escalate。
+                // 切到 Recovery 先回滚环境，下一轮循环开头的终止条件会触发 escalate。
                 // 进入 Recovery 或重新 Plan
                 if (state.noProgressCount >= t.maxNoProgress)
                     continue; // 下次迭代触发 Escalate
@@ -524,13 +420,13 @@ async function runLoop(state, config, deps, hooks) {
                     kind: 'narrative',
                     data: {
                         message: `子目标已完成: ${state.currentSubgoal}`,
-                        solution: String(state.custom['pendingProposal'] ?? '').slice(0, 100),
+                        solution: (state.pendingProposal ?? '').slice(0, 100),
                     },
                 });
                 // 添加到 archivedSubgoals，包含结论和完成状态
                 const archivedSubgoal = {
                     goal: state.currentSubgoal,
-                    summary: String(state.custom['pendingProposal'] ?? '').slice(0, 500),
+                    summary: (state.pendingProposal ?? '').slice(0, 500),
                     outcome: 'completed',
                 };
                 state.archivedSubgoals.push(archivedSubgoal);
@@ -575,17 +471,22 @@ async function runLoop(state, config, deps, hooks) {
             }
             // 回滚
             await deps.harness.rollback();
+            // v2: 使用强类型字段 pendingProposal，设置为 undefined
+            state.pendingProposal = undefined;
             if ((0, state_1.canTransition)(state.mode, 'plan')) {
                 await hooks?.onModeTransition?.(state.mode, 'plan', state);
                 state.mode = 'plan';
                 state.version++;
-                state.custom['pendingProposal'] = null;
                 deps.trace.append({ ts: Date.now(), kind: 'state', data: { modeTransition: 'recovery→plan' } });
             }
         }
         // ── 9. [Paused 模式] ───────────────────────────────────────────────────
-        // Paused 模式的处理在 Interrupt 检查阶段已完成
-        // 如果到达这里，说明 Paused 模式需要切回其他模式
+        // v2: 根据 change.md 修改5，Paused 分支加防御性 throw
+        // 正常情况下不应到达此处：Paused 的切走逻辑在循环开头的 Interrupt 检查阶段已完成。
+        // 若执行到这里，说明 onInterrupt 没有正确切换 mode，属于内部错误。
+        if (state.mode === 'paused') {
+            throw new Error('Illegal state: reached paused branch in main loop switch. onInterrupt must transition mode away from paused.');
+        }
         // ── 10. 每次迭代结束：State 持久化 ───────────────────────────────────────
         await deps.stateManager.save(deps.agentDir, state);
     }

@@ -11,6 +11,7 @@ export type AgentState = {
     subgoals: string[];
     currentSubgoal: string | null;
     archivedSubgoals: ArchivedSubgoal[];
+    pendingProposal?: string;
     mode: Mode;
     permissions: PermissionLevel;
     iterationCount: number;

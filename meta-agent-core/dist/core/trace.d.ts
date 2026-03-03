@@ -22,6 +22,8 @@ export type TraceEntry = {
     input?: string;
     output?: string;
     durationMs?: number;
+    riskApproved?: boolean;
+    riskReason?: string;
 };
 export type OperationType = 'llmcall' | 'collect' | 'read' | 'write' | 'edit' | 'bash';
 export type TerminalEntry = {

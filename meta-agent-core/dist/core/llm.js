@@ -19,9 +19,10 @@ class LLMCall {
     async reason(context, input) {
         const staticCtx = this.staticContext ? `\n\n## 静态上下文（AGENT.md）\n${this.staticContext}\n` : '';
         const system = `你是一个编码 Agent。请根据 context 完成任务，并在末尾以 JSON 输出：
-{"result": "...", "uncertainty": {"score": 0-1, "reasons": []}}${staticCtx}`;
+{"result": "...", "uncertainty": {"score": 0-1, "reasons": []}, "riskApproved": true/false, "riskReason": "可选的风险说明"}.
+重要提示：如果不确定，优先选择副作用最小的行动。${staticCtx}`;
         const raw = await this.provider.complete(system, `Context:\n${context}\n\nTask:\n${input}`);
-        return this.parseWithUncertainty(raw);
+        return this.parseWithUncertaintyAndRisk(raw);
     }
     // Reason（多候选）：uncertainty 高时使用
     async reasonMulti(context, input, n = 3) {
@@ -76,6 +77,36 @@ class LLMCall {
             return {
                 result: raw,
                 uncertainty: { score: 0.8, reasons: ['JSON 解析失败'] },
+            };
+        }
+    }
+    // v2: Reason 输出解析，包含 riskApproved 字段
+    parseWithUncertaintyAndRisk(raw) {
+        const jsonStr = this.extractJson(raw);
+        try {
+            const parsed = JSON.parse(jsonStr);
+            // 如果解析结果是空对象，或者没有 uncertainty，也视为解析失败
+            if (!parsed || (Object.keys(parsed).length === 0) || !parsed.uncertainty) {
+                return {
+                    result: raw,
+                    uncertainty: { score: 0.8, reasons: ['JSON 解析失败'] },
+                    riskApproved: true, // 解析失败时默认通过，让后续逻辑处理
+                    riskReason: 'JSON 解析失败',
+                };
+            }
+            return {
+                result: parsed.decision ?? parsed.result ?? raw,
+                uncertainty: parsed.uncertainty,
+                riskApproved: parsed.riskApproved ?? true, // 默认通过
+                riskReason: parsed.riskReason,
+            };
+        }
+        catch {
+            return {
+                result: raw,
+                uncertainty: { score: 0.8, reasons: ['JSON 解析失败'] },
+                riskApproved: true, // 解析失败时默认通过
+                riskReason: 'JSON 解析失败',
             };
         }
     }
