@@ -80,17 +80,18 @@ class LLMCall {
             reasonSection ? `\n## 策略与风险偏好\n${reasonSection}` : '',
             learnedSection ? `\n## 历史经验（只读）\n${learnedSection}` : '',
         ].filter(Boolean).join('\n');
-        const system = `你是一个编码 Agent。请根据 context 完成任务，并在末尾以 JSON 输出：
-{"result": "...", "uncertainty": {"score": 0-1, "reasons": []}, "riskApproved": true/false, "riskReason": "可选的风险说明", "proposalValid": true/false}.
-重要提示：
-1. 如果不确定，优先选择副作用最小的行动。
-2. proposalValid 表示提案格式是否正确、是否可执行。
-3. 你必须使用 <invoke name="工具名"> 格式来执行实际操作，不能只做分析。
-4. 如果需要读取文件或执行命令，必须实际调用工具，不要只是描述要做什么。
-5. Context 中已提供 AGENT.md 和 skills 的内容，请按照其中的 workflow 执行任务。
-6. 工作目录是 survey_agent_python/，所有路径都相对于该目录。
-7. 执行顺序：先 fetcher(arXiv API) → 再 screener(筛选) → 最后 analyst(分析写入知识库)。
-若你的提案中包含工具调用（<invoke> 格式），uncertainty 评分应基于工具调用
+        const system = `你是一个编码 Agent。请根据 context 完成任务。
+
+重要约束：
+1. **必须先输出结构化 JSON 推理结果，然后再输出工具调用**。JSON 和 <invoke> 标签不能混合在同一输出中。
+2. JSON 格式：{"result": "...", "uncertainty": {"score": 0-1, "reasons": []}, "riskApproved": true/false, "riskReason": "可选的风险说明", "proposalValid": true/false}
+3. 如果需要执行工具，请在 JSON 之后的单独段落中输出 <invoke name="工具名"> 格式的工具调用。
+4. Context 中已提供 AGENT.md 和 skills 的内容，请按照其中的 workflow 执行任务，**无需再次读取这些文件**。
+5. 工作目录是 survey_agent_python/，所有路径都相对于该目录。
+6. 执行顺序：先 fetcher(arXiv API) → 再 screener(筛选) → 最后 analyst(分析写入知识库)。
+7. 如果不确定，优先选择副作用最小的行动。
+8. proposalValid 表示提案格式是否正确、是否可执行。
+9. 若你的提案中包含工具调用（<invoke> 格式），uncertainty 评分应基于工具调用
 执行后的预期状态来评估，而非将工具调用符号本身视为不确定因素。包含工具
 调用的提案通常意味着需要先获取上下文再做判断，应给予较低的 uncertainty
 评分以允许执行。${staticCtx}`;
@@ -162,7 +163,7 @@ class LLMCall {
             if (!parsed || (Object.keys(parsed).length === 0) || !parsed.uncertainty) {
                 return {
                     result: raw,
-                    uncertainty: { score: 0.8, reasons: ['JSON 解析失败'] },
+                    uncertainty: { score: 0.5, reasons: ['JSON 解析失败，使用原始输出'] },
                 };
             }
             return {
@@ -173,7 +174,7 @@ class LLMCall {
         catch {
             return {
                 result: raw,
-                uncertainty: { score: 0.8, reasons: ['JSON 解析失败'] },
+                uncertainty: { score: 0.5, reasons: ['JSON 解析失败，使用原始输出'] },
             };
         }
     }
@@ -186,7 +187,7 @@ class LLMCall {
             if (!parsed || (Object.keys(parsed).length === 0) || !parsed.uncertainty) {
                 return {
                     result: raw,
-                    uncertainty: { score: 0.8, reasons: ['JSON 解析失败'] },
+                    uncertainty: { score: 0.5, reasons: ['JSON 解析失败，使用原始输出'] }, // 解析失败时使用中等 uncertainty，让后续流程可以继续处理
                     riskApproved: true, // 解析失败时默认通过，让后续逻辑处理
                     riskReason: undefined, // 不设置误导性的 riskReason
                     proposalValid: true, // 默认认为有效
@@ -203,7 +204,7 @@ class LLMCall {
         catch {
             return {
                 result: raw,
-                uncertainty: { score: 0.8, reasons: ['JSON 解析失败'] },
+                uncertainty: { score: 0.5, reasons: ['JSON 解析失败，使用原始输出'] }, // 解析失败时使用中等 uncertainty，让后续流程可以继续处理
                 riskApproved: true, // 解析失败时默认通过
                 riskReason: undefined, // 不设置误导性的 riskReason
                 proposalValid: true, // 默认认为有效

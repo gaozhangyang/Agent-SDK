@@ -17,6 +17,7 @@ const MAX_OUTPUT_LENGTH = 100 * 1024;
 /**
  * 解析并执行工具调用
  * 根据 change.md 问题2：LLM 返回的工具调用需要实际执行
+ * 根据 change.md 问题三：对 Read 操作增加路径预检，避免文件不存在时直接执行
  * 
  * @param proposal LLM 返回的包含工具调用的提案
  * @param primitives 执行工具的原语
@@ -46,7 +47,31 @@ async function executeToolCalls(proposal: string, primitives: Primitives): Promi
           pathMatch = toolArgs.match(/<parameter name="file_path">([\s\S]*?)<\/parameter>/);
         }
         const path = pathMatch ? pathMatch[1] : toolArgs.trim();
-        result = await primitives.read(path);
+        
+        // 根据 change.md 问题三：增加路径预检，验证文件是否存在
+        // 检查文件是否存在
+        let fileExists = false;
+        try {
+          // 尝试用 bash 检查文件是否存在
+          const checkResult = await primitives.bash(`test -e "${path}" && echo "exists" || echo "not_exists"`);
+          fileExists = checkResult.trim() === 'exists';
+        } catch {
+          fileExists = false;
+        }
+        
+        if (!fileExists) {
+          // 根据 change.md 问题三：如果文件不存在，返回明确的错误信息，帮助 LLM 区分「路径错」还是「参数名错」
+          // 检查是否使用了错误的参数名（file_path vs path）
+          const hasWrongParam = /<parameter name="file_path">/.test(toolArgs) || /<parameter name="path">/.test(toolArgs);
+          if (hasWrongParam) {
+            result = `[Read failed]: 文件 "${path}" 不存在。请检查路径是否正确，工作目录是 survey_agent_python/。`;
+          } else {
+            result = `[Read failed]: 文件 "${path}" 不存在，参数名可能错误（应使用 "path" 而非 "file_path"）。`;
+          }
+        } else {
+          // 文件存在，正常读取
+          result = await primitives.read(path);
+        }
       } else if (toolName === 'Write') {
         // 解析 path 和 content 参数（兼容 file_path 和 path 两种参数名）
         let pathMatch = toolArgs.match(/<parameter name="path">([\s\S]*?)<\/parameter>/);
@@ -808,6 +833,10 @@ export async function runLoop(
       await deps.harness.rollback();
       // v2: 使用强类型字段 pendingProposal，设置为 undefined
       state.pendingProposal = undefined;
+      
+      // 根据 change.md 问题二：Recovery 后必须重新执行 Collect，确保 Plan 阶段有完整上下文
+      state.custom['needsCollect'] = true;
+      
       if (canTransition(state.mode, 'plan')) {
         await hooks?.onModeTransition?.(state.mode, 'plan', state);
         state.mode = 'plan';

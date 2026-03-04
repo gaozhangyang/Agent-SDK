@@ -215,7 +215,7 @@ skills/
 | confidenceLow   | 置信度低阈值  | Collect 阶段                      | 收集的上下文覆盖度(coverage)或可靠性(reliability)低于此值时，触发 Escalate            | 0.3 |
 | confidenceMid   | 置信度中阈值  | Collect 阶段                      | 用于内部判断，当前仅作为参考阈值                                                 | 0.6 |
 | uncertaintyHigh | 不确定性高阈值 | Plan/Reason 阶段和 Review/Judge 阶段 | LLM 推理的 uncertainty.score 高于此值，或 Judge 判断不确定性过高时，触发 Escalate     | 0.7 |
-| maxNoProgress   | 最大无进展次数 | Review 阶段                       | 连续多次迭代未达成目标（achieved=false 或 uncertainty 过高）时累加，达到此值后触发 Escalate | 10  |
+| maxNoProgress   | 最大无进展次数 | Review 阶段                       | 连续多次迭代未达成目标（achieved=false 或 uncertainty 过高）时累加，达到此值后触发 Escalate | 3   |
 | maxIterations   | 最大迭代次数  | 循环入口                            | 整个任务的总迭代次数达到此值后，任务以 budget_exceeded 状态终止                         | 30  |
 | truncateWindowSize | 截断窗口大小 | TerminalLog 格式化阶段 | terminal.md 中输入输出的截断窗口大小，控制展示长度 | 200 |
 
