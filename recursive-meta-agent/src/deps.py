@@ -101,7 +101,7 @@ def topological_sort(tasks: List[Dict[str, Any]]) -> Optional[List[Dict[str, Any
 
 def get_execution_levels(tasks: List[Dict[str, Any]]) -> List[List[Dict[str, Any]]]:
     """
-    获取执行层级，同层的可以并发执行
+    获取执行层级，按拓扑序返回
     返回: [[task1, task2], [task3], [task4, task5], ...]
     """
     # 拓扑排序

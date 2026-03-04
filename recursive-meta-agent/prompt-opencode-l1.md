@@ -115,16 +115,16 @@ def validate_dependencies(subtasks: list[dict]) -> list[dict]:
     """
 ```
 
-### 并发执行
+### 串行执行
 
-`execute_decompose()` 里用 `concurrent.futures.ThreadPoolExecutor` 实现无依赖子节点的并发：
+`execute_decompose()` 里按拓扑序串行执行子节点：
 
 ```python
 def execute_decompose(goal_dir, goal, subtasks, depth, permissions, logger):
     # 1. 创建子节点目录，写 goal.md 和 meta.json
     # 2. validate_dependencies()
-    # 3. 拓扑排序，得到执行层级（同层的可以并发）
-    # 4. 逐层执行：同层内用 ThreadPoolExecutor 并发调用 meta_agent()
+    # 3. 拓扑排序，得到执行层级
+    # 4. 按拓扑序串行执行：逐层逐节点调用 meta_agent()
     # 5. 每层执行完后检查子节点 results.md 的 status
     #    发现 escalated → 写当前节点 results.md 为 escalated，停止
     # 6. 全部完成 → llm_call 聚合所有子节点 results.md → 写当前节点 results.md

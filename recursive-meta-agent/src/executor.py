@@ -7,7 +7,6 @@ import re
 import json
 import subprocess
 import hashlib
-import concurrent.futures
 from typing import Dict, Any, List, Optional
 from datetime import datetime
 
@@ -199,8 +198,8 @@ def execute_decompose(
     分解执行模式
     1. 创建子节点目录，写 goal.md 和 meta.json
     2. validate_dependencies()
-    3. 拓扑排序，得到执行层级（同层的可以并发）
-    4. 逐层执行：同层内用 ThreadPoolExecutor 并发调用 meta_agent()
+    3. 拓扑排序，得到执行层级
+    4. 按拓扑序串行执行：逐层逐节点执行 meta_agent()
     5. 每层执行完后检查子节点 results.md 的 status
     6. 全部完成 → llm_call 聚合所有子节点 results.md → 写当前节点 results.md
     """
@@ -279,30 +278,12 @@ def execute_decompose(
     # 3. 获取执行层级
     levels = get_execution_levels(validated_tasks)
 
-    # 4. 逐层执行
+    # 4. 按拓扑序逐层串行执行
     for level_idx, level_tasks in enumerate(levels):
-        # 同层并发执行
-        with concurrent.futures.ThreadPoolExecutor(
-            max_workers=len(level_tasks)
-        ) as executor:
-            futures = {}
-            for task in level_tasks:
-                subdir = os.path.join(goal_dir, task["name"])
-                future = executor.submit(meta_agent, subdir, depth + 1)
-                futures[future] = task["name"]
-
-            # 等待所有任务完成
-            for future in concurrent.futures.as_completed(futures):
-                task_name = futures[future]
-                try:
-                    future.result()
-                except Exception as e:
-                    logger.log_trace(
-                        kind="subtask_error",
-                        node=goal_dir,
-                        subtask=task_name,
-                        error=str(e),
-                    )
+        # 串行执行：按拓扑序逐节点执行
+        for task in level_tasks:
+            subdir = os.path.join(goal_dir, task["name"])
+            meta_agent(subdir, depth + 1)
 
         # 5. 检查子节点状态
         for task in level_tasks:

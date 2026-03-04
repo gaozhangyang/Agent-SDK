@@ -9,7 +9,6 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, Optional
-import threading
 
 
 class Logger:
@@ -19,13 +18,10 @@ class Logger:
     """
 
     _instance = None
-    _lock = threading.Lock()
 
     def __new__(cls, *args, **kwargs):
         if cls._instance is None:
-            with cls._lock:
-                if cls._instance is None:
-                    cls._instance = super().__new__(cls)
+            cls._instance = super().__new__(cls)
         return cls._instance
 
     def __init__(self, work_dir: str = None):
@@ -36,7 +32,6 @@ class Logger:
         self.work_dir = work_dir
         self.agent_dir = None
         self._seq = 0
-        self._seq_lock = threading.Lock()
 
         if work_dir:
             self.agent_dir = os.path.join(work_dir, ".agent")
@@ -50,9 +45,8 @@ class Logger:
 
     def _get_seq(self) -> int:
         """获取全局递增序列号"""
-        with self._seq_lock:
-            self._seq += 1
-            return self._seq
+        self._seq += 1
+        return self._seq
 
     def _get_timestamp(self) -> str:
         """获取时间戳"""

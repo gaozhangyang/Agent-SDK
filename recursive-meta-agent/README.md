@@ -254,7 +254,7 @@ def execute_decompose(goal_dir, goal, subtasks, depth, permissions):
     # 校验失败时把错误信息注回 LLMCall，重新产出依赖关系
     validated = validate_dependencies(subtasks)
 
-    # 按依赖关系执行，无依赖关系的子节点可并发
+    # 按依赖关系执行，按拓扑序串行执行子节点
     execute_by_dependency(validated, goal_dir, depth)
 
     # 聚合子节点结果：创建并执行 script.py
@@ -417,7 +417,7 @@ meta-agent 的完整核心，不可再拆分。能跑、能递归、能自愈、
 2. **meta_agent 核心递归函数**: 已实现
 3. **probe 函数**: 已实现
 4. **依赖校验层**: 实现了缺失依赖检测和循环依赖检测
-5. **并发执行**: 使用 ThreadPoolExecutor 实现
+5. **串行执行**: 按拓扑序逐节点执行
 6. **Recovery 机制**: 基于文件系统的状态恢复
 7. **全局记录**: trace.jsonl, terminal.md, state.jsonl
 8. **权限控制**: permissions.json 加载与权限校验
