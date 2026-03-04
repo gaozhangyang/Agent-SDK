@@ -44,6 +44,11 @@ export declare class LLMCall {
      */
     getAgentSection(type: 'all' | 'reason' | 'judgeOutcome' | 'judgeMilestone' | 'judgeCapability' | 'learnedPatterns'): string;
     reason(context: string, input: string): Promise<LLMCallResult>;
+    execute(context: string, task: string, result: string): Promise<string>;
+    /**
+     * 从 LLM 输出中提取 <invoke> 标签部分
+     */
+    private extractInvocations;
     reasonMulti(context: string, input: string, n?: number): Promise<LLMCallMulti>;
     judge(type: JudgeType, context: string, input: string): Promise<LLMCallResult>;
     private parseWithUncertainty;

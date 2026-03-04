@@ -111,7 +111,7 @@ export class LLMCall {
     return this.agentMdSections[sectionMap[type]] || '';
   }
 
-  // Reason：发散生成提案
+  // Reason：发散生成提案（只输出 JSON，不输出工具调用）
   async reason(context: string, input: string): Promise<LLMCallResult> {
     // 根据 README.md：使用 # [reason] section 作为策略上下文
     const reasonSection = this.getAgentSection('reason');
@@ -124,23 +124,75 @@ export class LLMCall {
       learnedSection ? `\n## 历史经验（只读）\n${learnedSection}` : '',
     ].filter(Boolean).join('\n');
 
+    // 根据 change.md 问题一：严格区分 Reason 和 Execute 阶段
+    // Reason 阶段只要求输出结构化 JSON，明确禁止输出 <invoke> 标签
     const system = `你是一个编码 Agent。请根据 context 完成任务。
 
 重要约束：
-1. **必须先输出结构化 JSON 推理结果，然后再输出工具调用**。JSON 和 <invoke> 标签不能混合在同一输出中。
+1. **你只需要输出结构化 JSON 推理结果，不需要输出任何工具调用**。
 2. JSON 格式：{"result": "...", "uncertainty": {"score": 0-1, "reasons": []}, "riskApproved": true/false, "riskReason": "可选的风险说明", "proposalValid": true/false}
-3. 如果需要执行工具，请在 JSON 之后的单独段落中输出 <invoke name="工具名"> 格式的工具调用。
+3. **禁止输出 <invoke> 标签或任何工具调用**，工具调用将在 Execute 阶段由框架自动处理。
 4. Context 中已提供 AGENT.md 和 skills 的内容，请按照其中的 workflow 执行任务，**无需再次读取这些文件**。
 5. 工作目录是 survey_agent_python/，所有路径都相对于该目录。
 6. 执行顺序：先 fetcher(arXiv API) → 再 screener(筛选) → 最后 analyst(分析写入知识库)。
 7. 如果不确定，优先选择副作用最小的行动。
 8. proposalValid 表示提案格式是否正确、是否可执行。
-9. 若你的提案中包含工具调用（<invoke> 格式），uncertainty 评分应基于工具调用
-执行后的预期状态来评估，而非将工具调用符号本身视为不确定因素。包含工具
-调用的提案通常意味着需要先获取上下文再做判断，应给予较低的 uncertainty
-评分以允许执行。${staticCtx}`;
+9. uncertainty 评分应基于对任务的理解程度来评估。${staticCtx}`;
     const raw = await this.provider.complete(system, `Context:\n${context}\n\nTask:\n${input}`);
     return this.parseWithUncertaintyRiskAndValid(raw);
+  }
+
+  // Execute：生成工具调用（只输出 <invoke> 标签，禁止 JSON 或自然语言）
+  async execute(context: string, task: string, result: string): Promise<string> {
+    const allSection = this.getAgentSection('all');
+    const reasonSection = this.getAgentSection('reason');
+    
+    const staticCtx = [
+      allSection ? `\n## 基础上下文\n${allSection}` : '',
+      reasonSection ? `\n## 策略与风险偏好\n${reasonSection}` : '',
+    ].filter(Boolean).join('\n');
+
+    // 根据 change.md 问题一：Execute 阶段只要求输出 <invoke> 工具调用
+    // 明确禁止输出 JSON 或自然语言计划描述
+    const system = `你现在处于 Execute 阶段。
+
+重要约束：
+1. **你必须且只能输出 <invoke> 格式的工具调用**。
+2. **禁止输出任何解释、计划或 JSON**。
+3. 使用以下工具格式：
+   - <invoke name="Bash"><parameter name="command">你的命令</parameter></invoke>
+   - <invoke name="Read"><parameter name="path">文件路径</parameter></invoke>
+   - <invoke name="Write"><parameter name="path">文件路径</parameter><parameter name="content">文件内容</parameter></invoke>
+   - <invoke name="Edit"><parameter name="path">文件路径</parameter><parameter name="old">旧内容</parameter><parameter name="next">新内容</parameter></invoke>
+4. **工作目录是 survey_agent_python/**，所有路径都相对于该目录。
+5. 如果你没有任何工具调用要执行，输出：<invoke name="Noop"></invoke>
+6. 请根据以下任务和推理结果，生成需要执行的工具调用。${staticCtx}`;
+    
+    const userMessage = `任务：${task}\n\n推理结果：${result}\n\n请生成需要执行的工具调用（只输出 <invoke> 标签，不要输出任何其他内容）：`;
+    const raw = await this.provider.complete(system, userMessage);
+    
+    // 提取并返回 <invoke> 标签部分
+    return this.extractInvocations(raw);
+  }
+
+  /**
+   * 从 LLM 输出中提取 <invoke> 标签部分
+   */
+  private extractInvocations(raw: string): string {
+    // 移除 JSON 部分（如果存在）
+    // 查找 JSON 结束位置，移除 JSON 部分
+    const jsonMatch = raw.match(/\{[\s\S]*\}$/);
+    if (jsonMatch) {
+      return raw.replace(jsonMatch[0], '').trim();
+    }
+    
+    // 如果没有 JSON，检查是否包含 <invoke> 标签
+    if (!/<invoke/.test(raw)) {
+      // 没有 <invoke> 标签，返回空，让后续处理
+      return '';
+    }
+    
+    return raw;
   }
 
   // Reason（多候选）：uncertainty 高时使用
@@ -216,7 +268,7 @@ export class LLMCall {
       if (!parsed || (Object.keys(parsed).length === 0) || !parsed.uncertainty) {
         return {
           result: raw,
-          uncertainty: { score: 0.5, reasons: ['JSON 解析失败，使用原始输出'] },
+          uncertainty: { score: 0.8, reasons: ['JSON 解析失败'] },
         };
       }
       return {
@@ -240,7 +292,7 @@ export class LLMCall {
       if (!parsed || (Object.keys(parsed).length === 0) || !parsed.uncertainty) {
         return {
           result: raw,
-          uncertainty: { score: 0.5, reasons: ['JSON 解析失败，使用原始输出'] }, // 解析失败时使用中等 uncertainty，让后续流程可以继续处理
+          uncertainty: { score: 0.8, reasons: ['JSON 解析失败'] }, // 解析失败时使用中等 uncertainty，让后续流程可以继续处理
           riskApproved: true, // 解析失败时默认通过，让后续逻辑处理
           riskReason: undefined, // 不设置误导性的 riskReason
           proposalValid: true, // 默认认为有效

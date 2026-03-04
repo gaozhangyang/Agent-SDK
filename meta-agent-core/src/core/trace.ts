@@ -20,7 +20,7 @@ export type Uncertainty = {
 export type TraceEntry = {
   ts: number;
   seq?: number;           // 全局自增序号（可选，由 append 方法自动分配）
-  kind: 'collect' | 'reason' | 'judge' | 'exec' |
+  kind: 'collect' | 'reason' | 'judge' | 'exec' | 'execute' | 'execute_retry' |
         'state' | 'escalate' | 'stop' | 'interrupt' | 'narrative';
   data: unknown;
   confidence?: Confidence;

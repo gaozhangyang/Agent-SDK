@@ -99,6 +99,10 @@ async function executeToolCalls(proposal: string, primitives: Primitives): Promi
         } else {
           result = `[Edit] Failed: missing required parameters`;
         }
+      } else if (toolName === 'Noop') {
+        // 根据 change.md 问题一：引入 Noop 工具
+        // 当 LLM 确实没有任何工具需要执行时，允许输出一个空操作
+        result = `[Noop] No operation to execute`;
       } else {
         result = `[${toolName}] Unknown tool`;
       }
@@ -590,6 +594,77 @@ export async function runLoop(
 
     // ── 5. [Execute 模式] ───────────────────────────────────────────────────
     if (state.mode === 'execute') {
+      // 根据 change.md 问题一：在 Execute 阶段调用 llm.execute() 生成工具调用
+      // 而不是直接使用 pendingProposal 中的内容
+      const task = state.currentSubgoal ?? state.goal;
+      const result = state.pendingProposal ?? '';
+      const context = collectResult?.context || '';
+
+      // 记录 Execute 阶段的 LLM 调用到 TerminalLog
+      const llmExecInput = `Context:\n${context}\n\nTask:\n${task}\n\nReason Result:\n${result}`;
+      const llmExecResult = await deps.llm.execute(context, task, result);
+      
+      // 根据 change.md 问题一：增加 Execute 阶段的输出验证
+      // 检测工具调用列表是否为空
+      const hasInvoke = /<invoke name="/.test(llmExecResult);
+      
+      // 记录 LLM Execute 到 TerminalLog
+      const { content: truncatedExecLLMOutput, truncated: execLLMTruncated } = truncateOutput(llmExecResult);
+      const execLLMSeq = deps.terminalLog.append({
+        ts: Date.now(),
+        operation: 'llmcall' as OperationType,
+        input: llmExecInput,
+        output: truncatedExecLLMOutput,
+        truncated: execLLMTruncated,
+      });
+      
+      // 记录到 trace
+      deps.trace.append({
+        ts: Date.now(),
+        seq: execLLMSeq,
+        kind: 'execute',
+        data: { task, result, llmOutput: llmExecResult },
+        input: llmExecInput,
+        output: truncatedExecLLMOutput,
+      });
+
+      // 如果没有工具调用，进入 format_error 处理
+      if (!hasInvoke) {
+        // 根据 change.md 问题一：向 LLM 发送纠正消息
+        // 但不进入 Recovery 大循环，而是让 LLM 重新生成
+        deps.trace.append({
+          ts: Date.now(),
+          kind: 'state',
+          data: { reason: 'execute_no_tool_calls', message: 'Execute 阶段没有检测到工具调用，将重新生成' },
+        });
+        
+        // 重新调用 LLM 生成工具调用（添加纠正提示）
+        const retryResult = await deps.llm.execute(context, task, result + '\n\n注意：你必须输出 <invoke> 格式的工具调用，不能输出纯文本或 JSON！');
+        
+        const { content: truncatedRetryOutput, truncated: retryTruncated } = truncateOutput(retryResult);
+        const retrySeq = deps.terminalLog.append({
+          ts: Date.now(),
+          operation: 'llmcall' as OperationType,
+          input: llmExecInput + '\n\n[纠正] 你必须输出 <invoke> 格式的工具调用',
+          output: truncatedRetryOutput,
+          truncated: retryTruncated,
+        });
+        
+        deps.trace.append({
+          ts: Date.now(),
+          seq: retrySeq,
+          kind: 'execute_retry',
+          data: { task, result, llmOutput: retryResult },
+          input: llmExecInput + '\n\n[纠正] 你必须输出 <invoke> 格式的工具调用',
+          output: truncatedRetryOutput,
+        });
+        
+        // 使用重试后的结果
+        state.pendingProposal = retryResult;
+      } else {
+        state.pendingProposal = llmExecResult;
+      }
+
       // 使用强类型字段 pendingProposal
       const proposal = state.pendingProposal ?? '';
 

@@ -121,6 +121,7 @@ Agent 不自动修改 AGENT.md——产出证据，人做决策，决策喂回 A
 | write | `write(path, content)` | 创建或覆写文件 |
 | edit | `edit(path, old, new)` | 精确局部替换，`old` 须唯一匹配 |
 | bash | `bash(command) → output` | 执行系统命令 |
+| noop | `noop() → `[Noop] | 空操作，当没有工具需要执行时使用 |
 
 合法写入区域仅限 Workspace 和 `.agent/`，其余路径白名单拒绝。git 为必要前置依赖，Boot 阶段检测不可用时直接 fail。
 
@@ -130,7 +131,8 @@ Agent 不自动修改 AGENT.md——产出证据，人做决策，决策喂回 A
 LLMCall(context, input) → { result, uncertainty{ score, reasons } }
 ```
 
-- **Reason**：产出 proposal，含 `riskApproved: boolean`、`riskReason?`、`proposalValid: boolean`、`uncertainty`。模型在 system prompt 约束下同时完成风险自评与权限校验。
+- **Reason**：产出 proposal，含 `riskApproved: boolean`、`riskReason?`、`proposalValid: boolean`、`uncertainty`。模型在 system prompt 约束下同时完成风险自评与权限校验。**只输出 JSON，不输出工具调用**。
+- **Execute**：根据 Reason 阶段的 proposal 生成工具调用。**只输出 `<invoke>` 格式的工具调用，禁止输出 JSON 或自然语言**。如果无操作可执行，输出 `<invoke name="Noop"></invoke>`。
 - **Judge(type)**：收敛裁决，`type ∈ { outcome, milestone, capability }`。uncertainty 高时 Escalate。每次调用必须显式指定 type。
 
 **AGENT.md section 过滤：** 按调用类型只注入相关 section，不全量注入。
@@ -151,7 +153,7 @@ LLMCall(context, input) → { result, uncertainty{ score, reasons } }
 ```typescript
 type TraceEntry = {
   ts: number; seq: number;
-  kind: 'collect' | 'reason' | 'judge' | 'exec' | 'state' |
+  kind: 'collect' | 'reason' | 'judge' | 'exec' | 'execute' | 'execute_retry' | 'state' |
         'escalate' | 'stop' | 'interrupt' | 'narrative';
   data: unknown;
   confidence?: Confidence;
@@ -253,6 +255,8 @@ goal:{goalId}       子目标追踪
   通过                                    → 存入 pendingProposal，切 Execute
 
 [Execute]
+  LLMCall[Execute] → 生成工具调用
+    检测到无工具调用 → 重新生成（带纠正提示）
   shouldSnapshot?  → git commit（失败 → Escalate: snapshot_failed）
   onBeforeExec(state, proposal)           → 'proceed' | 'block'
     危险操作 + 置信度低 → 备份到 backups/，写 Trace ⚠️
