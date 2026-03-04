@@ -20,6 +20,7 @@
 | 架构   | Loop-based 状态机             | 递归函数                          |
 | 复杂度  | 完整的 L1-L5 路线图              | 最小 L1 核心                      |
 | 启动方式 | 需要启动 SDK 服务器               | 直接本地执行                        |
+| 调试   | 需通过日志或 SDK 调试             | 支持直接在 IDE 中断点调试               |
 
 
 ## 核心功能
@@ -45,6 +46,7 @@ recursive_survey_agent/
 │   │   └── SKILL.md         # 技能说明文档
 │   └── pdf_extract/         # PDF 解析技能
 │       ├── SKILL.md         # 技能说明文档
+│       ├── download_pdf.py  # PDF 下载脚本
 │       └── extract_text.py  # PDF 文本提取脚本
 ├── goals/                    # 任务目标目录（每次运行自动创建）
 ├── data/                     # 运行时数据
@@ -75,7 +77,7 @@ recursive_survey_agent/
 ### 1. 依赖安装
 
 ```bash
-pip install requests
+pip install openai pymupdf
 ```
 
 ### 2. 配置 LLM
@@ -85,7 +87,7 @@ pip install requests
 ```bash
 export LLM_API_KEY=your_api_key
 export LLM_MODEL="MiniMax-M2.5"
-export LLM_BASE_URL="http://35.220.164.252:3888/v1"
+export LLM_BASE_URL="http://35.220.164.252:3888/v1/"
 ```
 
 或者编辑 `.agent/AGENT.md` 中的运行时配置：
@@ -93,7 +95,7 @@ export LLM_BASE_URL="http://35.220.164.252:3888/v1"
 ```json
 {
   "llm": {
-    "baseUrl": "http://35.220.164.252:3888/v1",
+    "baseUrl": "http://35.220.164.252:3888/v1/",
     "model": "MiniMax-M2.5",
     "apiKey": "your_api_key"
   }
@@ -199,6 +201,12 @@ python run.py
 
 本项目使用 `recursive-meta-agent` 作为后端，具有以下特性：
 
+> **调试提示**：由于使用直接函数调用而非 subprocess，可以在 IDE 中直接对 recursive-meta-agent 代码设置断点进行调试。
+
+> **Bug 修复**：已修复子任务（subgoal）节点命名问题。当 LLM 返回的子任务名称包含无效字符（如空格、斜杠、特殊字符）时，系统会自动清理和验证名称，确保可以成功创建子任务目录。
+
+> **Bug 修复**：已修复父节点（goal）在 decompose 模式下不创建 script.py 的问题。在 decompose 模式下，父节点现在也会创建 script.py 来执行"聚合子节点结果"的操作，保持与 direct 模式的一致性。
+
 ### 四个原语
 
 
@@ -234,10 +242,15 @@ python -m pytest tests/test_structure.py -v
 
 ## 注意事项
 
-1. 使用前需确保 `recursive-meta-agent` 目录存在且包含 `main.py`
+1. 使用前需确保 `recursive-meta-agent` 目录存在（包含 src/agent.py）
 2. 需要配置有效的 LLM API Key（或通过环境变量设置）
-3. arXiv API 有速率限制，建议每次请求间隔 3 秒以上
-4. PDF 下载会占用较多存储空间，注意清理
+3. **LLM 配置**：确保使用 MiniMax API 而非 OpenAI API
+   - 默认配置已在 `.agent/AGENT.md` 中设置
+   - 环境变量会覆盖配置文件中的设置
+   - 如遇 `401 Unauthorized` 错误，检查 `LLM_BASE_URL` 是否指向正确的 API 地址
+4. arXiv API 有速率限制，建议每次请求间隔 3 秒以上
+5. PDF 下载会占用较多存储空间，注意清理
+6. 由于使用直接函数调用，可以直接在 IDE 中对 recursive-meta-agent 进行调试
 
 ## License
 

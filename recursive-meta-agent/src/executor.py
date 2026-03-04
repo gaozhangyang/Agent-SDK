@@ -3,6 +3,7 @@
 """
 
 import os
+import re
 import json
 import subprocess
 import hashlib
@@ -13,6 +14,44 @@ from datetime import datetime
 from logger import get_logger
 from primitives import make_primitives
 from deps import validate_dependencies, get_execution_levels, ValidationError
+
+
+def sanitize_subtask_name(name: str) -> str:
+    """
+    清理和验证 subtask 名称，确保它可以作为有效的目录名。
+
+    规则：
+    - 只允许字母、数字、下划线、连字符（ASCII）
+    - 移除或替换无效字符（空格、斜杠、冒号等）
+    - 确保名称不为空
+    - 截断过长名称
+    """
+    if not name:
+        return f"subtask_{hashlib.md5(str(datetime.now()).encode()).hexdigest()[:8]}"
+
+    # 转换为字符串并移除首尾空白
+    name = str(name).strip()
+
+    # 替换空格为下划线
+    name = name.replace(" ", "_")
+
+    # 只保留字母、数字、下划线、连字符（ASCII字符）
+    # 同时保留Unicode字符（如中文、日文等）
+    # 移除斜杠、冒号、反斜杠等在文件系统中可能有问题的字符
+    name = re.sub(r'[\\/:*"<>|]', "", name)
+
+    # 移除前导/尾随的非字母数字字符（保留Unicode字符）
+    name = re.sub(r"^[_\-]+|[_\-]+$", "", name, flags=re.ASCII)
+
+    # 如果名称为空，生成一个基于原始名称哈希的名称
+    if not name or not re.search(r"[a-zA-Z0-9_\-\u4e00-\u9fff]", name):
+        name = f"subtask_{hashlib.md5(name.encode()).hexdigest()[:8]}"
+
+    # 截断到合理长度（避免超长路径问题）
+    if len(name) > 64:
+        name = name[:64]
+
+    return name
 
 
 def execute_direct(
@@ -171,6 +210,22 @@ def execute_decompose(
     decomposition_id = hashlib.md5(str(subtasks).encode()).hexdigest()
 
     # 1. 创建子节点目录
+    # 首先清理所有 subtask 名称，确保它们是有效的目录名
+    name_mapping = {}  # 原始名称 -> 清理后的名称
+    for subtask in subtasks:
+        original_name = subtask.get("name", "")
+        sanitized_name = sanitize_subtask_name(original_name)
+        name_mapping[original_name] = sanitized_name
+        subtask["name"] = sanitized_name
+
+    # 再次验证依赖（使用清理后的名称）
+    try:
+        validated_tasks = validate_dependencies(subtasks)
+    except ValidationError as e:
+        # 依赖校验失败，抛出错误让上层重新生成
+        raise e
+
+    # 创建子节点目录
     for subtask in subtasks:
         subdir = os.path.join(goal_dir, subtask["name"])
         os.makedirs(subdir, exist_ok=True)
@@ -195,6 +250,24 @@ def execute_decompose(
         meta_path = os.path.join(subdir, "meta.json")
         with open(meta_path, "w", encoding="utf-8") as f:
             json.dump(meta, f, indent=2, ensure_ascii=False)
+
+        # 写入 permissions.json（继承父节点权限，但做一些限制）
+        child_permissions = {
+            "read": permissions.get("read", []),
+            "write": permissions.get("write", []),
+            "bash": {
+                "network": permissions.get("bash", {}).get("network", True),
+                "delete": False,  # 子节点默认不允许删除
+            },
+            "max_depth": permissions.get("max_depth", 4),
+            "max_output_length": permissions.get("max_output_length", 102400),
+            "context_budget": permissions.get(
+                "context_budget", {"total": 200000, "reservedOutput": 4000}
+            ),
+        }
+        perm_path = os.path.join(subdir, "permissions.json")
+        with open(perm_path, "w", encoding="utf-8") as f:
+            json.dump(child_permissions, f, indent=2, ensure_ascii=False)
 
     # 2. 验证依赖
     try:
@@ -263,48 +336,63 @@ def aggregate_results(
 ) -> None:
     """
     聚合所有子节点 results.md
+    1. 生成 script.py（负责读取子节点结果并调用 llm_call 聚合）
+    2. 执行 script.py
     """
     primitives = make_primitives(goal_dir, permissions, logger)
     llm_call = primitives["llm_call"]
 
-    # 收集子节点结果
-    results = []
+    # 收集子节点信息（名称和路径），供 script.py 使用
+    subtask_info = []
     for subtask in subtasks:
         subdir = os.path.join(goal_dir, subtask["name"])
         results_path = os.path.join(subdir, "results.md")
-
         if os.path.exists(results_path):
-            with open(results_path, "r", encoding="utf-8") as f:
-                content = f.read()
-            results.append(f"## {subtask['name']}\n{content}")
+            subtask_info.append({"name": subtask["name"], "results_path": results_path})
 
-    # LLM 聚合
-    prompt = f"""Synthesize the results from all subtasks to answer the original goal.
+    # 1. 生成 script.py，让 LLM 生成聚合逻辑代码
+    prompt = f"""Generate a Python script to aggregate results from subtasks and answer the original goal.
 
 Original goal:
 {goal}
 
-Subtask results:
-{"\n\n---\n\n".join(results)}
+Subtasks to aggregate:
+{json.dumps(subtask_info, indent=2, ensure_ascii=False)}
 
-Provide a final synthesized answer in JSON format:
-{{"status": "completed", "result": "..."}}
+The script should:
+1. Read each subtask's results.md file
+2. Call llm_call() to synthesize all results into a final answer
+3. Write the final result to {goal_dir}/results.md in JSON format:
+   {{"status": "completed", "result": "..."}}
+
+You can use these primitives:
+- read(path): Read file content
+- write(path, content): Write file content
+- bash(command): Execute shell command
+- llm_call(context, prompt): Call LLM API
 """
 
     try:
-        synthesis = llm_call(context=results, prompt=prompt)
+        script_content = llm_call(context=[goal], prompt=prompt)
 
-        # 解析结果
-        parsed = parse_results(synthesis)
+        # 解析 script 内容
+        script = parse_script(script_content)
 
-        # 写入 results.md
+        # 写入 script.py
+        script_path = os.path.join(goal_dir, "script.py")
+        with open(script_path, "w", encoding="utf-8") as f:
+            f.write(script)
+
+        logger.log_trace(kind="script_generated", node=goal_dir, note="aggregate")
+
+        # 2. 执行 script.py（聚合逻辑）
+        execute_script(goal_dir, permissions, logger)
+
+        # 检查 results.md 是否成功写入
         results_path = os.path.join(goal_dir, "results.md")
-        # 先删除旧文件
-        if os.path.exists(results_path):
-            os.remove(results_path)
-
-        with open(results_path, "w", encoding="utf-8") as f:
-            json.dump(parsed, f, indent=2, ensure_ascii=False)
+        if not os.path.exists(results_path):
+            # 如果 script.py 没有写入 results，手动写入一个默认结果
+            write_results_completed(goal_dir, "Aggregation completed via script.py")
 
         # 更新 meta
         update_meta_status(goal_dir, "completed")

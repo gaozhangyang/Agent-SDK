@@ -59,14 +59,17 @@ recursive_survey_agent/
 
 recursive-meta-agent 使用四个原语执行任务：
 
-| 原语 | 说明 | 用法示例 |
-|------|------|----------|
-| `read(path)` | 读取文件内容 | `content = read("skills/arxiv_api/SKILL.md")` |
-| `write(path, content)` | 写入文件 | `write("data/output.txt", "Hello")` |
-| `bash(command)` | 执行 shell 命令 | `output = bash("python script.py")` |
-| `llm_call(context, prompt)` | 调用 LLM | `result = llm_call(context, "分析这段文字")` |
+
+| 原语                          | 说明          | 用法示例                                          |
+| --------------------------- | ----------- | --------------------------------------------- |
+| `read(path)`                | 读取文件内容      | `content = read("skills/arxiv_api/SKILL.md")` |
+| `write(path, content)`      | 写入文件        | `write("data/output.txt", "Hello")`           |
+| `bash(command)`             | 执行 shell 命令 | `output = bash("python script.py")`           |
+| `llm_call(context, prompt)` | 调用 LLM      | `result = llm_call(context, "分析这段文字")`        |
+
 
 **重要**：
+
 - 所有原语直接可用，不需要 import
 - `read` 可以跨目录读取（在 permissions.json 允许范围内）
 - `write` 默认只能写当前节点目录
@@ -91,16 +94,19 @@ recursive-meta-agent 使用四个原语执行任务：
 **目标**：从 arXiv API 抓取指定分类的最新论文。
 
 **配置来源**：
+
 - 优先参考 `skills/arxiv_api/SKILL.md`
 - 从本 AGENT.md 的「运行时配置」中读取 `fetch_max_papers` 和 topics 的 `arxiv_categories`
 
 **调用参数**：
+
 - `categories`: arXiv 分类列表（如 `cs.CV`, `cs.LG`）
 - `max_results`: 最大抓取数量（默认 10）
 - `start_date`: 开始日期 (YYYYMMDD)
 - `end_date`: 结束日期 (YYYYMMDD)
 
 **输出约定**：
+
 - 将原始结果写入 `data/raw_papers_{YYYY-MM-DD}.json`
 - 输出格式参考 `skills/arxiv_api/SKILL.md`
 
@@ -116,15 +122,18 @@ output = bash("python skills/arxiv_api/fetch_arxiv.py -c cs.CV,cs.LG -m 10 -o da
 **目标**：基于用户兴趣配置和知识库关键词筛选论文。
 
 **配置来源**：
+
 - 优先参考 `skills/screening/SKILL.md`
 - 从本 AGENT.md 的「运行时配置」中读取 topics 和 screening_threshold
 - 读取 `knowledge_base/{topic}/meta.json`
 - 读取 `data/blacklist.json`
 
 **输入**：
+
 - `raw_papers_{YYYY-MM-DD}.json`（Fetcher 阶段的输出）
 
 **输出约定**：
+
 - 写入 `data/selected_papers_{YYYY-MM-DD}.json`
 - 输出结构沿用 `skills/screening/SKILL.md` 的格式
 
@@ -145,25 +154,27 @@ output = bash("""python skills/screening/screen_papers.py \
 **对每一篇论文，按如下顺序操作**：
 
 1. **下载 PDF**（如果本地没有）：
-   - PDF 存储路径：`data/pdfs/{arxiv_id}.pdf`
+  - PDF 存储路径：`data/pdfs/{arxiv_id}.pdf`
 2. **提取 PDF 文本**：
-   - 使用 `skills/pdf_extract/extract_text.py`
-   - 输出到 `data/pdfs/{arxiv_id}.txt`
+  - 使用 `skills/pdf_extract/extract_text.py`
+  - 输出到 `data/pdfs/{arxiv_id}.txt`
 3. **生成论文总结**：
-   - 使用 llm_call 配合 skills/writing/
-   - 写入 `knowledge_base/{topic}/paper_{arxiv_id}.md`
-   - 更新 `knowledge_base/{topic}/meta.json`
+  - 使用 llm_call 配合 skills/writing/
+  - 写入 `knowledge_base/{topic}/paper_{arxiv_id}.md`
+  - 更新 `knowledge_base/{topic}/meta.json`
 
 ### 目录与文件约定
 
-| 类型 | 路径 | 说明 |
-|------|------|------|
-| 原始论文 | `data/raw_papers_{YYYY-MM-DD}.json` | Fetcher 输出 |
-| 筛选后论文 | `data/selected_papers_{YYYY-MM-DD}.json` | Screener 输出 |
-| PDF 文件 | `data/pdfs/{arxiv_id}.pdf` | 论文 PDF |
-| PDF 文本 | `data/pdfs/{arxiv_id}.txt` | 可选提取文本 |
-| 论文总结 | `knowledge_base/{topic}/paper_{arxiv_id}.md` | Analyst 输出 |
-| 知识库元信息 | `knowledge_base/{topic}/meta.json` | 板块元信息 |
+
+| 类型     | 路径                                           | 说明          |
+| ------ | -------------------------------------------- | ----------- |
+| 原始论文   | `data/raw_papers_{YYYY-MM-DD}.json`          | Fetcher 输出  |
+| 筛选后论文  | `data/selected_papers_{YYYY-MM-DD}.json`     | Screener 输出 |
+| PDF 文件 | `data/pdfs/{arxiv_id}.pdf`                   | 论文 PDF      |
+| PDF 文本 | `data/pdfs/{arxiv_id}.txt`                   | 可选提取文本      |
+| 论文总结   | `knowledge_base/{topic}/paper_{arxiv_id}.md` | Analyst 输出  |
+| 知识库元信息 | `knowledge_base/{topic}/meta.json`           | 板块元信息       |
+
 
 ## 运行时配置
 
@@ -172,7 +183,7 @@ output = bash("""python skills/screening/screen_papers.py \
 ```json
 {
   "llm": {
-    "baseUrl": "http://35.220.164.252:3888/v1",
+    "baseUrl": "http://35.220.164.252:3888/v1/",
     "model": "MiniMax-M2.5",
     "apiKey": "${LLM_API_KEY}"
   },
@@ -208,19 +219,22 @@ output = bash("""python skills/screening/screen_papers.py \
 ```
 
 环境变量覆盖：
+
 - `LLM_API_KEY`: API 密钥
 - `LLM_MODEL`: 模型名称（默认: MiniMax-M2.5）
 - `LLM_BASE_URL`: API 地址
 
 ### 阈值配置说明
 
-| 阈值项 | 说明 | 默认值 |
-|--------|------|--------|
-| max_depth | 最大递归深度 | 4 |
-| max_retry | 最大重试次数 | 3 |
-| maxOutputLength | 输出最大长度 | 102400 |
-| context_budget_total | 上下文总 token 预算 | 200000 |
-| context_budget_reserved | 保留给输出的 token 数 | 4000 |
+
+| 阈值项                     | 说明             | 默认值    |
+| ----------------------- | -------------- | ------ |
+| max_depth               | 最大递归深度         | 4      |
+| max_retry               | 最大重试次数         | 3      |
+| maxOutputLength         | 输出最大长度         | 102400 |
+| context_budget_total    | 上下文总 token 预算  | 200000 |
+| context_budget_reserved | 保留给输出的 token 数 | 4000   |
+
 
 ## 设计原则
 
@@ -229,3 +243,4 @@ output = bash("""python skills/screening/screen_papers.py \
 3. **Python 薄封装**：Python 代码只提供运行时容器和少量胶水逻辑
 4. **修改优先序**：业务逻辑修改应优先改 AGENT.md 和 skills
 5. **配置集中管理**：所有运行时配置集中在 AGENT.md 中
+

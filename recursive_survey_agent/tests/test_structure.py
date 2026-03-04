@@ -48,6 +48,7 @@ class TestProjectStructure:
             "skills/screening/screen_papers.py",
             "skills/writing/SKILL.md",
             "skills/pdf_extract/SKILL.md",
+            "skills/pdf_extract/download_pdf.py",
             "skills/pdf_extract/extract_text.py",
             "templates/paper_summary.md",
         ]

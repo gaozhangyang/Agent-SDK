@@ -3,6 +3,7 @@
 run.py — Recursive Survey Agent 入口脚本
 
 使用 recursive-meta-agent 作为后端执行 Survey Workflow。
+通过直接导入调用，方便调试。
 
 使用方法:
     python run.py                      # 执行一次完整的 Survey Workflow
@@ -23,7 +24,6 @@ import json
 import os
 import re
 import shutil
-import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -33,6 +33,13 @@ from typing import Any, Dict, Optional
 BASE_DIR = Path(__file__).parent.absolute()
 AGENT_MD = BASE_DIR / ".agent" / "AGENT.md"
 RECURSIVE_META_AGENT_DIR = BASE_DIR.parent / "recursive-meta-agent"
+
+# 将 recursive-meta-agent 的 src 目录添加到 Python 路径
+if RECURSIVE_META_AGENT_DIR.exists():
+    sys.path.insert(0, str(RECURSIVE_META_AGENT_DIR / "src"))
+    from agent import run_agent as meta_agent_run
+else:
+    meta_agent_run = None
 
 
 def load_agent_config() -> Dict[str, Any]:
@@ -233,7 +240,7 @@ def run_recursive_meta_agent(goal_dir: Path, recover: bool = False) -> Dict[str,
     """
     调用 recursive-meta-agent 执行任务。
 
-    通过 subprocess 调用 recursive-meta-agent/main.py
+    通过直接导入调用 recursive-meta-agent 的 run_agent 函数。
     """
     # 检查 recursive-meta-agent 目录
     if not RECURSIVE_META_AGENT_DIR.exists():
@@ -246,8 +253,19 @@ def run_recursive_meta_agent(goal_dir: Path, recover: bool = False) -> Dict[str,
     if not main_py.exists():
         return {"status": "error", "reason": f"main.py not found at {main_py}"}
 
-    # 准备环境变量
-    env = os.environ.copy()
+    # 确保 recursive-meta-agent 的 src 目录在路径中
+    src_dir = RECURSIVE_META_AGENT_DIR / "src"
+    if str(src_dir) not in sys.path:
+        sys.path.insert(0, str(src_dir))
+
+    # 尝试导入 run_agent
+    try:
+        from agent import run_agent as meta_agent_run
+    except ImportError as e:
+        return {
+            "status": "error",
+            "reason": f"Failed to import run_agent: {e}",
+        }
 
     # 从配置中获取 LLM 配置
     llm_config = {}
@@ -258,39 +276,33 @@ def run_recursive_meta_agent(goal_dir: Path, recover: bool = False) -> Dict[str,
         pass
 
     # 设置环境变量 (优先级: 环境变量 > 配置文件)
-    if "LLM_API_KEY" not in env:
-        env["LLM_API_KEY"] = llm_config.get("apiKey", os.environ.get("LLM_API_KEY", ""))
-    if "LLM_MODEL" not in env:
-        env["LLM_MODEL"] = llm_config.get("model", "MiniMax-M2.5")
-    if "LLM_BASE_URL" not in env:
-        env["LLM_BASE_URL"] = llm_config.get("baseUrl", "http://35.220.164.252:3888/v1")
+    if "LLM_API_KEY" not in os.environ:
+        os.environ["LLM_API_KEY"] = llm_config.get(
+            "apiKey", os.environ.get("LLM_API_KEY", "")
+        )
+    if "LLM_MODEL" not in os.environ:
+        os.environ["LLM_MODEL"] = llm_config.get("model", "MiniMax-M2.5")
+    if "LLM_BASE_URL" not in os.environ:
+        os.environ["LLM_BASE_URL"] = llm_config.get(
+            "baseUrl", "http://35.220.164.252:3888/v1"
+        )
 
     # 设置额外的环境变量
-    env["MAX_DEPTH"] = str(llm_config.get("max_depth", 4))
-    env["MAX_RETRY"] = str(llm_config.get("max_retry", 3))
-
-    # 构建命令
-    cmd = [sys.executable, str(main_py), "--goal-dir", str(goal_dir)]
-    if recover:
-        cmd.append("--recover")
+    os.environ["MAX_DEPTH"] = str(llm_config.get("max_depth", 4))
+    os.environ["MAX_RETRY"] = str(llm_config.get("max_retry", 3))
 
     print(f"\n{'=' * 60}")
     print(f"Recursive Survey Agent Workflow 启动")
     print(f"{'=' * 60}")
     print(f"Goal Directory: {goal_dir}")
-    print(f"LLM: {env.get('LLM_MODEL')} @ {env.get('LLM_BASE_URL')}")
+    print(f"LLM: {os.environ.get('LLM_MODEL')} @ {os.environ.get('LLM_BASE_URL')}")
     print(f"Recover: {recover}")
     print(f"{'=' * 60}\n")
 
     try:
-        # 执行 recursive-meta-agent
-        result = subprocess.run(
-            cmd,
-            cwd=str(RECURSIVE_META_AGENT_DIR),
-            env=env,
-            capture_output=False,  # 直接输出到终端
-            timeout=3600,  # 60 分钟超时
-        )
+        # 直接调用 run_agent 函数
+        goal_dir_str = str(goal_dir)
+        meta_agent_run(goal_dir_str, recover_mode=recover)
 
         # 检查结果
         results_path = goal_dir / "results.md"
@@ -320,8 +332,6 @@ def run_recursive_meta_agent(goal_dir: Path, recover: bool = False) -> Dict[str,
                 "goal_dir": str(goal_dir),
             }
 
-    except subprocess.TimeoutExpired:
-        return {"status": "error", "reason": "Execution timeout after 60 minutes"}
     except Exception as e:
         return {"status": "error", "reason": str(e)}
 

@@ -223,5 +223,67 @@ class TestExecuteScript(unittest.TestCase):
         execute_script(self.node_dir, permissions, self.mock_logger)
 
 
+class TestSanitizeSubtaskName(unittest.TestCase):
+    """测试 sanitize_subtask_name 函数"""
+
+    def test_normal_name(self):
+        """测试正常名称"""
+        from executor import sanitize_subtask_name
+
+        result = sanitize_subtask_name("subtask1")
+        self.assertEqual(result, "subtask1")
+
+    def test_name_with_spaces(self):
+        """测试包含空格的名称"""
+        from executor import sanitize_subtask_name
+
+        result = sanitize_subtask_name("fetch papers")
+        self.assertEqual(result, "fetch_papers")
+
+    def test_name_with_special_chars(self):
+        """测试包含特殊字符的名称"""
+        from executor import sanitize_subtask_name
+
+        result = sanitize_subtask_name("fetch/papers:2024")
+        self.assertEqual(result, "fetchpapers2024")
+
+    def test_name_with_unicode(self):
+        """测试包含中文的名称"""
+        from executor import sanitize_subtask_name
+
+        result = sanitize_subtask_name("获取论文")
+        # Unicode字符应该被保留
+        self.assertEqual(result, "获取论文")
+
+    def test_empty_name(self):
+        """测试空名称"""
+        from executor import sanitize_subtask_name
+
+        result = sanitize_subtask_name("")
+        self.assertTrue(result.startswith("subtask_"))
+
+    def test_name_with_leading_trailing_spaces(self):
+        """测试前后有空格的名称"""
+        from executor import sanitize_subtask_name
+
+        result = sanitize_subtask_name("  task1  ")
+        self.assertEqual(result, "task1")
+
+    def test_long_name(self):
+        """测试超长名称"""
+        from executor import sanitize_subtask_name
+
+        long_name = "a" * 100
+        result = sanitize_subtask_name(long_name)
+        self.assertEqual(len(result), 64)
+
+    def test_name_with_hyphen(self):
+        """测试包含连字符的名称"""
+        from executor import sanitize_subtask_name
+
+        result = sanitize_subtask_name("fetch-papers-2024")
+        self.assertEqual(result, "fetch-papers-2024")
+
+
 if __name__ == "__main__":
     unittest.main()

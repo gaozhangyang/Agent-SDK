@@ -28,6 +28,46 @@
 pip install pymupdf
 ```
 
+## PDF 下载
+
+在提取文本之前，需要先下载 PDF 文件。本目录提供了 `download_pdf.py` 脚本用于从 arXiv 下载 PDF 文件。
+
+### 命令行方式
+
+```bash
+# 下载单个 PDF
+python skills/pdf_extract/download_pdf.py 2602.24289v1 -o data/pdfs/
+
+# 从 JSON 文件批量下载
+python skills/pdf_extract/download_pdf.py --input data/selected_papers.json -o data/pdfs/
+
+# 强制覆盖已存在的文件
+python skills/pdf_extract/download_pdf.py 2602.24289v1 -o data/pdfs/ --force
+```
+
+参数说明：
+- `arxiv_id`: arXiv 论文 ID (必需，除非使用 --input)
+- `-i, --input`: 包含论文信息的 JSON 文件
+- `-o, --output`: 输出目录 (默认: data/pdfs)
+- `-f, --force`: 覆盖已存在的文件
+
+### Python 调用方式
+
+```python
+from skills.pdf_extract.download_pdf import download_pdf, download_papers_from_json
+from pathlib import Path
+
+# 下载单个 PDF
+result = download_pdf("2602.24289v1", Path("data/pdfs"))
+print(f"Downloaded to: {result}")
+
+# 从 JSON 批量下载
+results = download_papers_from_json(
+    Path("data/selected_papers.json"),
+    Path("data/pdfs")
+)
+```
+
 ## 在本目录下运行脚本
 
 ### 命令行方式
@@ -88,7 +128,7 @@ extract_text(
 
 ## 与其它技能的衔接
 
-- **输入来源**: 消费 PDF 文件（通常由 `scripts/download_pdf.py` 下载）
+- **输入来源**: 消费 PDF 文件（由 `download_pdf.py` 下载）
 - **输出给 writing**: 提取的文本可作为 `skills/writing/` 的输入，供 LLM 分析总结
 - **Collect 配置使用**: 可在 collectConfig 中直接引用提取的文本文件
 

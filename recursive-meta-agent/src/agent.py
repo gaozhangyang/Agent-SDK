@@ -236,7 +236,20 @@ def get_subtasks(
     """
     获取子任务列表
     """
+    import re
     from primitives import make_primitives
+
+    def sanitize_name(name: str) -> str:
+        """清理 subtask 名称，确保可以创建有效目录"""
+        if not name:
+            return ""
+        name = str(name).strip()
+        name = name.replace(" ", "_")
+        name = re.sub(r"[^a-zA-Z0-9_\-]", "", name)
+        name = re.sub(r"^[_\-]+|[_\-]+$", "", name)
+        if len(name) > 64:
+            name = name[:64]
+        return name
 
     primitives = make_primitives(node_dir, permissions, logger)
     llm_call = primitives["llm_call"]
@@ -255,10 +268,19 @@ Return a JSON array of subtasks:
     {{"name": "subtask2", "description": "description of subtask 2", "depends_on": ["subtask1"]}}
 ]
 
-Each subtask should:
-- Have a unique name (no spaces, use underscore)
-- Have a clear description
-- List dependencies (other subtask names it depends on)
+IMPORTANT: Each subtask name MUST:
+- Only contain letters, numbers, underscores, and hyphens (a-z, A-Z, 0-9, _, -)
+- NOT contain spaces, slashes, colons, or any special characters
+- Be unique within the list
+- Example good names: "fetch_papers", "screen-results", "write_summary"
+- Example bad names: "fetch papers", "screen/results", "write:summary"
+
+Example:
+[
+    {{"name": "fetch_papers", "description": "Fetch papers from arXiv", "depends_on": []}},
+    {{"name": "screen_papers", "description": "Screen papers for relevance", "depends_on": ["fetch_papers"]}},
+    {{"name": "write_summary", "description": "Write summary", "depends_on": ["screen_papers"]}}
+]
 """
 
     max_retries = 3
@@ -271,6 +293,28 @@ Each subtask should:
             subtasks = parse_subtasks(result)
 
             if subtasks:
+                # 清理所有 subtask 名称
+                for subtask in subtasks:
+                    original_name = subtask.get("name", "")
+                    sanitized_name = sanitize_name(original_name)
+
+                    # 如果清理后的名称为空，生成一个默认名称
+                    if not sanitized_name:
+                        sanitized_name = (
+                            f"subtask_{attempt}_{hash(original_name) % 10000}"
+                        )
+
+                    subtask["name"] = sanitized_name
+
+                    # 同时清理 depends_on 中的名称
+                    if "depends_on" in subtask:
+                        cleaned_deps = []
+                        for dep in subtask["depends_on"]:
+                            cleaned_dep = sanitize_name(dep)
+                            if cleaned_dep:
+                                cleaned_deps.append(cleaned_dep)
+                        subtask["depends_on"] = cleaned_deps
+
                 # 验证依赖
                 try:
                     validated = validate_dependencies(subtasks)

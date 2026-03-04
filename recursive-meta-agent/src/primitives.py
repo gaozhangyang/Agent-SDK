@@ -6,7 +6,6 @@
 import os
 import subprocess
 import json
-import requests
 from pathlib import Path
 from typing import Union, List, Optional
 
@@ -168,6 +167,11 @@ def make_primitives(node_dir: str, permissions: dict, logger) -> dict:
         超出 token 预算时优先截断低优先级 context，不静默丢弃
         调用前后写 trace.jsonl（kind: llm_call，记录 token 数）
         """
+        # 动态读取环境变量，确保使用最新的配置
+        llm_model = os.environ.get("LLM_MODEL", "gpt-4")
+        llm_api_key = os.environ.get("LLM_API_KEY", "")
+        llm_base_url = os.environ.get("LLM_BASE_URL", "https://api.openai.com/v1")
+
         # 处理 context
         if isinstance(context, list):
             context_str = "\n\n---\n\n".join(context)
@@ -194,27 +198,8 @@ def make_primitives(node_dir: str, permissions: dict, logger) -> dict:
                 context_str += "\n\n[Context truncated due to token budget]"
 
         # 准备 API 请求
-        if not LLM_API_KEY:
+        if not llm_api_key:
             raise ValueError("LLM_API_KEY not set in environment variables")
-
-        # 构建请求
-        headers = {
-            "Authorization": f"Bearer {LLM_API_KEY}",
-            "Content-Type": "application/json",
-        }
-
-        data = {
-            "model": LLM_MODEL,
-            "messages": [
-                {"role": "system", "content": "You are a helpful assistant."},
-                {
-                    "role": "user",
-                    "content": f"Context:\n{context_str}\n\n---\n\nPrompt:\n{prompt}",
-                },
-            ],
-            "temperature": 0.7,
-            "max_tokens": 4096,
-        }
 
         # 记录调用
         seq = logger.log_trace(
@@ -225,18 +210,34 @@ def make_primitives(node_dir: str, permissions: dict, logger) -> dict:
         )
 
         try:
-            import requests
+            from openai import OpenAI
 
-            response = requests.post(
-                f"{LLM_BASE_URL}/chat/completions",
-                headers=headers,
-                json=data,
-                timeout=120,
+            # 创建 OpenAI 客户端
+            client = OpenAI(
+                base_url=llm_base_url,
+                api_key=llm_api_key,
             )
-            response.raise_for_status()
 
-            result = response.json()
-            output = result["choices"][0]["message"]["content"]
+            # 调用 LLM
+            response = client.chat.completions.create(
+                model=llm_model,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "You are a helpful assistant.",
+                    },
+                    {
+                        "role": "user",
+                        "content": f"Context:\n{context_str}\n\n---\n\nPrompt:\n{prompt}",
+                    },
+                ],
+                temperature=0.7,
+                max_tokens=4096,
+            )
+
+            output = response.choices[0].message.content
+            if output is None:
+                raise ValueError("LLM returned empty response")
 
             # 记录响应
             output_tokens = len(output) // 4

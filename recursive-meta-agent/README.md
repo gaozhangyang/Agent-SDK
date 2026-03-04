@@ -73,6 +73,14 @@ llm_call(context, prompt)     → result    # 唯一的随机性入口
 
 **节点目录**：每个节点是完全自包含的执行单元。给定一个节点目录，meta-agent 可以独立执行，不需要感知父节点或兄弟节点的存在。
 
+**子任务名称验证**：当 LLM 返回子任务列表时，系统会自动验证和清理子任务名称，确保它们是有效的目录名。规则如下：
+- 只允许字母、数字、下划线、连字符
+- 空格会被替换为下划线
+- 特殊字符（斜杠、冒号、星号等）会被移除
+- 前后空白会被移除
+- 空名称会生成默认名称
+- 名称会被截断到 64 字符以避免超长路径问题
+
 ---
 
 ## 节点元数据
@@ -249,13 +257,15 @@ def execute_decompose(goal_dir, goal, subtasks, depth, permissions):
     # 按依赖关系执行，无依赖关系的子节点可并发
     execute_by_dependency(validated, goal_dir, depth)
 
-    # 聚合子节点结果
-    results = [read(f"{goal_dir}/{s.name}/results.md") for s in subtasks]
-    synthesis = llm_call(
-        context=results,
-        prompt=f"综合以上子任务结果，回答原始问题：{goal}"
+    # 聚合子节点结果：创建并执行 script.py
+    # script.py 内部读取各子节点的 results.md，调用 llm_call 合成最终结果
+    script = llm_call(
+        context=[goal],
+        prompt="生成 Python 脚本，用于聚合各子节点结果并回答原始问题"
     )
-    write(f"{goal_dir}/results.md", synthesis)
+    write(f"{goal_dir}/script.py", script)
+    exec(f"python {goal_dir}/script.py")
+    # results.md 由 script.py 内部的 write() 写入
     update_meta(goal_dir, status='completed')
 ```
 
