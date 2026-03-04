@@ -1,0 +1,10 @@
+{
+  "name": "Computer_Vision",
+  "description": "计算机视觉相关论文，包括图像生成、视频生成、图像编辑、目标检测、图像分割等",
+  "keywords": ["video generation", "diffusion", "video synthesis", "long video", "image generation", "image editing", "object detection", "image segmentation"],
+  "arxiv_categories": ["cs.CV"],
+  "paper_count": 0,
+  "min_relevance_score": 0.6,
+  "created_at": "2026-01-01T00:00:00Z",
+  "updated_at": "2026-01-01T00:00:00Z"
+}

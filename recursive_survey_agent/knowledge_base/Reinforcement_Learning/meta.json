@@ -1,0 +1,10 @@
+{
+  "name": "Reinforcement_Learning",
+  "description": "强化学习相关论文，包括策略学习、奖励设计、多智能体、强化学习应用等",
+  "keywords": ["reinforcement learning", "RL", "policy", "reward", "agent", "multi-agent", "game AI"],
+  "arxiv_categories": ["cs.LG", "cs.AI"],
+  "paper_count": 0,
+  "min_relevance_score": 0.5,
+  "created_at": "2026-01-01T00:00:00Z",
+  "updated_at": "2026-01-01T00:00:00Z"
+}

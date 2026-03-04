@@ -1,0 +1,22 @@
+{
+  "read": [
+    ".",
+    "../.agent/",
+    "../../skills/"
+  ],
+  "write": [
+    ".",
+    "../data/",
+    "../knowledge_base/"
+  ],
+  "bash": {
+    "network": true,
+    "delete": false
+  },
+  "max_depth": 4,
+  "max_output_length": 102400,
+  "context_budget": {
+    "total": 200000,
+    "reservedOutput": 4000
+  }
+}
