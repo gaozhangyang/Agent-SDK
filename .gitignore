@@ -4,6 +4,8 @@ agent_chat_config.json
 # Python 缓存
 .pip
 .ruff_cache
+**/__pycache__/
+*.pyc
 node_modules
 data
 **/state.json

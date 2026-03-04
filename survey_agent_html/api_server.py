@@ -143,9 +143,9 @@ def run_pipeline_thread(
     options = options or {}
     start_date = options.get("start_date")
     end_date = options.get("end_date")
-    max_results = options.get("max_results") or config["global_settings"][
-        "fetch_max_papers"
-    ]
+    max_results = (
+        options.get("max_results") or config["global_settings"]["fetch_max_papers"]
+    )
     research_query = options.get("research_query")
 
     def debug_broadcast(event: str, data: Dict[str, Any]):
@@ -180,6 +180,7 @@ def run_pipeline_thread(
                     "llm": config["global_settings"]["llm"],
                     "thresholds": {"maxIterations": 50, "maxNoProgress": 5},
                     "debug": DEBUG_MODE,
+                    "resume": False,  # 每次运行都是新的 goal，不恢复之前的 session
                 },
                 timeout=600,
             )
@@ -223,7 +224,7 @@ def run_pipeline_thread(
 
         # 直接使用本地脚本获取论文，不依赖 SDK
         import subprocess
-        
+
         cats = list({c for t in config["topics"] for c in t["arxiv_categories"]})
         cats_str = ",".join(cats)
         raw_file = DATA_DIR / f"raw_papers_{today}.json"
@@ -477,21 +478,33 @@ def run_pipeline_thread(
                         run_state["progress"]["current"] = i + 1
                         continue
 
+                    # 构建完整的 collectConfig sources，参照 run.py 的 build_collect_sources
+                    collect_sources = [
+                        # AGENT.md - 核心 workflow 定义
+                        {"type": "file", "query": ".agent/AGENT.md"},
+                        # Skills 文档
+                        {"type": "skills", "query": "arxiv_api"},
+                        {"type": "skills", "query": "screening"},
+                        {"type": "skills", "query": "writing"},
+                        # 模板文件
+                        {"type": "file", "query": "templates/paper_summary.md"},
+                        # 知识库 meta.json
+                        {
+                            "type": "file",
+                            "query": f"knowledge_base/{target_topic}/meta.json",
+                        },
+                        # PDF 文件
+                        {
+                            "type": "file",
+                            "query": str(pdf_path),
+                        },
+                    ]
+
                     res = sdk_run(
                         f"深度分析 {paper['arxiv_id']}（{paper['title']}），"
                         f"PDF已下载到{pdf_path}，生成总结，写入knowledge_base/{target_topic}/paper_{paper['arxiv_id']}.md，"
                         f"更新meta.json",
-                        [
-                            {"type": "file", "query": "templates/paper_summary.md"},
-                            {
-                                "type": "file",
-                                "query": f"knowledge_base/{target_topic}/meta.json",
-                            },
-                            {
-                                "type": "file",
-                                "query": str(pdf_path),
-                            },
-                        ],
+                        collect_sources,
                         f"正在分析: {paper['title'][:40]}...",
                     )
 

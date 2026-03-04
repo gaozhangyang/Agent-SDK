@@ -53,7 +53,7 @@
     }
   ],
   "global_settings": {
-    "pdf_download_dir": "/Applications/workspace/ailab/research/agent_runtime_core_final/survey_agent/data/pdfs",
+    "pdf_download_dir": "/Applications/workspace/ailab/research/agent_runtime_core_final/survey_agent_html/data/pdfs",
     "fetch_max_papers": 100,
     "screening_threshold": 7.0,
     "schedule_utc_hour": 8,
