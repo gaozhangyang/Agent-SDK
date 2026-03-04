@@ -1,5 +1,13 @@
 export type PermissionLevel = 0 | 1 | 2 | 3 | 4;
 export type Mode = 'plan' | 'execute' | 'review' | 'recovery' | 'paused';
+/**
+ * 环境能力探测结果
+ */
+export type EnvironmentCapabilities = {
+    networkAvailable: boolean;
+    writePermission: boolean;
+    availableTools: string[];
+};
 export type SubgoalOutcome = 'completed' | 'voided';
 export type ArchivedSubgoal = {
     goal: string;
@@ -7,17 +15,22 @@ export type ArchivedSubgoal = {
     outcome: SubgoalOutcome;
 };
 export type AgentState = {
+    sessionId: string;
+    parentSessionId?: string;
     goal: string;
     subgoals: string[];
     currentSubgoal: string | null;
+    currentSubgoal_src?: string;
     archivedSubgoals: ArchivedSubgoal[];
     pendingProposal?: string;
+    completedToolCalls?: string[];
     lastExecResult?: string;
     mode: Mode;
     permissions: PermissionLevel;
     iterationCount: number;
     noProgressCount: number;
     version: number;
+    environmentCapabilities?: EnvironmentCapabilities;
     custom: Record<string, unknown>;
 };
 export declare const MODE_TRANSITIONS: Record<Mode, (Mode | 'stop')[]>;
@@ -43,4 +56,5 @@ export declare class StateManager {
     createInitial(goal: string, permissions?: PermissionLevel): AgentState;
 }
 export declare function createInitialState(goal: string, permissions?: PermissionLevel): AgentState;
+export declare function generateSessionId(): string;
 //# sourceMappingURL=state.d.ts.map

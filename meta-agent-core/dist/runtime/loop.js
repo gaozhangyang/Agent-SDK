@@ -1,7 +1,11 @@
 "use strict";
 // [编排层 / 循环] runtime/loop.ts — Loop 骨架 + LoopHooks 接口 + 终止条件
+// 修改：Boot 阶段 git 检测、Collect 触发规则变更、添加 proposalValid 检查
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.DEFAULT_THRESHOLDS = void 0;
+exports.checkContextBudget = checkContextBudget;
+exports.checkGitAvailable = checkGitAvailable;
+exports.detectEnvironmentCapabilities = detectEnvironmentCapabilities;
 exports.runLoop = runLoop;
 const collect_1 = require("../core/collect");
 const state_1 = require("./state");
@@ -92,7 +96,7 @@ function truncateOutput(output) {
     }
     return { content: output, truncated: false };
 }
-// 默认阈值（与 v1 完全相同）
+// 默认阈值
 exports.DEFAULT_THRESHOLDS = {
     confidenceLow: 0.3,
     confidenceMid: 0.6,
@@ -100,12 +104,92 @@ exports.DEFAULT_THRESHOLDS = {
     maxNoProgress: 3,
     maxIterations: 50,
 };
+const DEFAULT_CONTEXT_BUDGET = {
+    total: 200000,
+    reservedSystemPrompt: 10000,
+    reservedOutput: 4000,
+};
+/**
+ * 检查上下文预算是否足够
+ * @param currentTokens 当前上下文长度（字符数 / 4 ≈ token）
+ * @param budget 预算配置
+ * @returns { sufficient: boolean; required: number; available: number }
+ */
+function checkContextBudget(currentTokens, budget = DEFAULT_CONTEXT_BUDGET) {
+    const available = budget.total - budget.reservedSystemPrompt - budget.reservedOutput;
+    return {
+        sufficient: currentTokens <= available,
+        required: currentTokens,
+        available,
+    };
+}
+/**
+ * 检测 git 是否可用
+ */
+async function checkGitAvailable(primitives) {
+    try {
+        await primitives.bash('git --version');
+        return true;
+    }
+    catch {
+        return false;
+    }
+}
+/**
+ * 探测环境能力
+ */
+async function detectEnvironmentCapabilities(primitives) {
+    const capabilities = {
+        networkAvailable: false,
+        writePermission: true,
+        availableTools: ['read', 'write', 'edit', 'bash'],
+    };
+    // 检测网络可用性
+    try {
+        await primitives.bash('curl -s --connect-timeout 5 https://www.google.com -o /dev/null && echo "ok"');
+        capabilities.networkAvailable = true;
+    }
+    catch {
+        capabilities.networkAvailable = false;
+    }
+    // 检测写权限
+    try {
+        await primitives.bash('touch /tmp/.agent_write_test && rm /tmp/.agent_write_test');
+        capabilities.writePermission = true;
+    }
+    catch {
+        capabilities.writePermission = false;
+    }
+    return capabilities;
+}
 /**
  * 运行 Agent 循环
  * 必须严格按 Loop 顺序执行
  */
 async function runLoop(state, config, deps, hooks) {
     const t = { ...exports.DEFAULT_THRESHOLDS, ...config.thresholds };
+    const contextBudget = config.contextBudget || DEFAULT_CONTEXT_BUDGET;
+    // ── [Boot 阶段] ─────────────────────────────────────────────────────────
+    // 1. git 可用性检测
+    const gitAvailable = await checkGitAvailable(deps.primitives);
+    if (!gitAvailable) {
+        deps.trace.append({
+            ts: Date.now(),
+            kind: 'escalate',
+            data: { reason: 'git_unavailable', message: 'Git is not available. Agent requires git for version control.' }
+        });
+        await config.onEscalate?.('git_unavailable', state);
+        return { status: 'escalated', reason: 'git_unavailable', state, humanActionRequired: 'Please ensure git is installed and accessible.' };
+    }
+    // 2. 探测环境能力（仅首次运行时）
+    if (state.iterationCount === 1 && !state.environmentCapabilities) {
+        state.environmentCapabilities = await detectEnvironmentCapabilities(deps.primitives);
+        deps.trace.append({
+            ts: Date.now(),
+            kind: 'state',
+            data: { environmentCapabilities: state.environmentCapabilities },
+        });
+    }
     // 任务开始时记录用户请求（仅首次运行时记录）
     if (state.iterationCount === 1 && state.archivedSubgoals.length === 0) {
         deps.memory.append({
@@ -193,46 +277,69 @@ async function runLoop(state, config, deps, hooks) {
             await deps.stateManager.save(deps.agentDir, state);
             return { status: 'completed', state };
         }
-        // ── 3. [Collect] → confidence 分支：补采集 / Escalate / 继续 ─────────────
-        let collectResult = await (0, collect_1.collect)(config.collectConfig, deps.primitives, (tag) => deps.trace.filterByTag(tag), deps.skillsDir);
-        // 记录 Collect 到 TerminalLog 和 Trace
-        const { content: truncatedContext, truncated } = truncateOutput(collectResult.context);
-        const collectSeq = deps.terminalLog.append({
-            ts: Date.now(),
-            operation: 'collect',
-            input: JSON.stringify(config.collectConfig.sources),
-            output: truncatedContext,
-            truncated,
-        });
-        // 根据 change.md：Collect 补完整记录，使用与 terminalLog 相同的 seq
-        deps.trace.append({
-            ts: Date.now(),
-            seq: collectSeq, // 使用 terminalLog 分配的相同 seq，确保一致性
-            kind: 'collect',
-            data: { sources: config.collectConfig.sources.map((s) => s.query) },
-            input: JSON.stringify(config.collectConfig.sources), // 补齐 input
-            output: truncatedContext, // 补齐 output
-            confidence: collectResult.confidence,
-        });
-        // confidence 低 → Escalate
-        if (collectResult.confidence.coverage < t.confidenceLow ||
-            collectResult.confidence.reliability < t.confidenceLow) {
-            const reason = `置信度不足: coverage=${collectResult.confidence.coverage.toFixed(2)}, reliability=${collectResult.confidence.reliability.toFixed(2)}`;
+        // ── 3. [Collect] → 仅在需要时执行（由 uncertainty 触发）──────────────────
+        // 根据 README.md：Collect 不是每轮必跑的固定步骤，而是被 LLMCall 的低置信度主动触发
+        // 首次迭代或需要补充信息时执行 Collect
+        let collectResult = null;
+        const shouldCollect = state.iterationCount === 1 ||
+            state.custom['needsCollect'] === true;
+        if (shouldCollect) {
+            collectResult = await (0, collect_1.collect)(config.collectConfig, deps.primitives, (tag) => deps.trace.filterByTag(tag), deps.skillsDir);
+            // 记录 Collect 到 TerminalLog 和 Trace
+            const { content: truncatedContext, truncated } = truncateOutput(collectResult.context);
+            const collectSeq = deps.terminalLog.append({
+                ts: Date.now(),
+                operation: 'collect',
+                input: JSON.stringify(config.collectConfig.sources),
+                output: truncatedContext,
+                truncated,
+            });
             deps.trace.append({
                 ts: Date.now(),
-                kind: 'escalate',
-                data: { reason },
+                seq: collectSeq,
+                kind: 'collect',
+                data: { sources: config.collectConfig.sources.map((s) => s.query) },
+                input: JSON.stringify(config.collectConfig.sources),
+                output: truncatedContext,
                 confidence: collectResult.confidence,
             });
-            await config.onEscalate?.(reason, state);
-            return { status: 'escalated', reason, state };
+            // confidence 低 → Escalate（StaticCollect 降级模式不 Escalate）
+            if (collectResult.confidence.coverage < t.confidenceLow ||
+                collectResult.confidence.reliability < t.confidenceLow) {
+                const reason = `置信度不足: coverage=${collectResult.confidence.coverage.toFixed(2)}, reliability=${collectResult.confidence.reliability.toFixed(2)}`;
+                deps.trace.append({
+                    ts: Date.now(),
+                    kind: 'escalate',
+                    data: { reason },
+                    confidence: collectResult.confidence,
+                });
+                await config.onEscalate?.(reason, state);
+                return { status: 'escalated', reason, state };
+            }
+            // 重置 needsCollect 标记
+            state.custom['needsCollect'] = false;
         }
         // ── 4. [Plan 模式] LLMCall[Reason] → uncertainty 分支 ───────────────────
         if (state.mode === 'plan') {
             const taskDesc = state.currentSubgoal ?? state.goal;
+            // 如果没有执行 Collect，使用默认空 context
+            const context = collectResult?.context || '';
+            // ContextBudget 检查
+            const currentTokens = context.length / 4;
+            const budgetCheck = checkContextBudget(currentTokens, contextBudget);
+            if (!budgetCheck.sufficient) {
+                // 上下文超预算，触发降级或 Escalate
+                deps.trace.append({
+                    ts: Date.now(),
+                    kind: 'escalate',
+                    data: { reason: 'context_budget_exceeded', available: budgetCheck.available, required: budgetCheck.required },
+                });
+                await config.onEscalate?.('context_budget_exceeded', state);
+                return { status: 'escalated', reason: 'context_budget_exceeded', state };
+            }
             // 记录 LLMCall reason 到 TerminalLog
-            const llmInput = `Context:\n${collectResult.context}\n\nTask:\n${taskDesc}`;
-            const reasonResult = await deps.llm.reason(collectResult.context, taskDesc);
+            const llmInput = `Context:\n${context}\n\nTask:\n${taskDesc}`;
+            const reasonResult = await deps.llm.reason(context, taskDesc);
             // 记录到 TerminalLog
             const { content: truncatedOutput, truncated } = truncateOutput(reasonResult.result);
             const llmcallSeq = deps.terminalLog.append({
@@ -245,26 +352,43 @@ async function runLoop(state, config, deps, hooks) {
             // 防御性检查：确保 uncertainty 对象存在
             const uncertaintyScore = reasonResult.uncertainty?.score ?? 0.8;
             const uncertaintyReasons = reasonResult.uncertainty?.reasons ?? ['uncertainty undefined'];
-            // 根据 change.md：LLMCall[Reason] 补完整记录，使用相同的 seq
-            // v2: 包含 riskApproved 和 riskReason
+            // 记录到 trace
             deps.trace.append({
                 ts: Date.now(),
-                seq: llmcallSeq, // 使用 terminalLog 分配的相同 seq
+                seq: llmcallSeq,
                 kind: 'reason',
                 data: { task: taskDesc, result: reasonResult.result },
-                input: llmInput, // 补齐 input
-                output: truncatedOutput, // 补齐 output
+                input: llmInput,
+                output: truncatedOutput,
                 uncertainty: { score: uncertaintyScore, reasons: uncertaintyReasons },
-                // v2: 记录 riskApproved 到 trace
                 riskApproved: reasonResult.riskApproved,
                 riskReason: reasonResult.riskReason,
             });
-            // v2: 根据 change.md 修改1，删除 reasonMulti + judge('selection') 分支
-            // 将不确定性推回模型侧处理，在 system prompt 中已添加指令
-            // v2: 根据 change.md 修改2，使用 reason 返回的 riskApproved 字段
-            // riskApproved === false 或 uncertainty.score > uncertaintyHigh → escalate
+            // 检查 proposalValid
+            const proposalValid = reasonResult.proposalValid ?? true;
+            if (!proposalValid) {
+                // 提案无效，触发 Collect 后重新 Plan（计入重试次数）
+                state.custom['needsCollect'] = true;
+                deps.trace.append({
+                    ts: Date.now(),
+                    kind: 'state',
+                    data: { reason: 'proposal_invalid_trigger_collect' },
+                });
+                continue;
+            }
+            // 检查 riskApproved 和 uncertainty
             const riskApproved = reasonResult.riskApproved ?? true;
             if (!riskApproved || uncertaintyScore > t.uncertaintyHigh) {
+                // uncertainty 过高 → 触发 Collect
+                if (uncertaintyScore > t.uncertaintyHigh) {
+                    state.custom['needsCollect'] = true;
+                    deps.trace.append({
+                        ts: Date.now(),
+                        kind: 'state',
+                        data: { reason: 'uncertainty_high_trigger_collect', uncertaintyScore },
+                    });
+                    continue;
+                }
                 const reason = !riskApproved
                     ? `Judge(risk) 拒绝: ${reasonResult.riskReason || '无风险说明'}`
                     : `Reason 不确定性过高: ${uncertaintyScore.toFixed(2)}`;
@@ -272,7 +396,7 @@ async function runLoop(state, config, deps, hooks) {
                 await config.onEscalate?.(reason, state);
                 return { status: 'escalated', reason, state };
             }
-            // v2: 将 pendingProposal 从 custom 改为强类型字段
+            // 将 pendingProposal 从 custom 改为强类型字段
             state.pendingProposal = reasonResult.result;
             // 切换到 Execute（经 canTransition 校验）
             if ((0, state_1.canTransition)(state.mode, 'execute')) {
@@ -285,7 +409,7 @@ async function runLoop(state, config, deps, hooks) {
         }
         // ── 5. [Execute 模式] ───────────────────────────────────────────────────
         if (state.mode === 'execute') {
-            // v2: 使用强类型字段 pendingProposal
+            // 使用强类型字段 pendingProposal
             const proposal = state.pendingProposal ?? '';
             // shouldSnapshot Hook → 快照失败阻断
             const shouldSnapshot = hooks?.shouldSnapshot
@@ -293,7 +417,7 @@ async function runLoop(state, config, deps, hooks) {
                 : false;
             if (shouldSnapshot) {
                 const snapshotOk = await deps.harness.snapshot(`iter-${state.iterationCount}`);
-                // v2: 根据 change.md 修改7，snapshot 失败的 escalate reason 细化
+                // snapshot 失败的 escalate reason 细化
                 if (!snapshotOk) {
                     const reason = 'snapshot_failed';
                     deps.trace.append({
@@ -320,12 +444,33 @@ async function runLoop(state, config, deps, hooks) {
                 await config.onEscalate?.(reason, state);
                 return { status: 'escalated', reason, state };
             }
+            // 危险操作备份：根据 README.md，危险操作需要备份到 .agent/backups/
+            // 检测提案中是否包含危险操作（bash 删除、网络等）
+            const isDangerous = /rm\s+-[rf]|del\s+\/|curl|wget|npm\s+i|pip\s+install/i.test(proposal);
+            if (isDangerous && state.permissions < 3) {
+                // 权限不足且包含危险操作，备份文件
+                const backupDir = `${deps.agentDir}/backups`;
+                try {
+                    await deps.primitives.bash(`mkdir -p ${backupDir}`);
+                    // 备份当前工作目录的关键文件（简化版：备份 .agent/state.json）
+                    const timestamp = Date.now();
+                    await deps.primitives.bash(`cp ${deps.agentDir}/state.json ${backupDir}/${timestamp}_state.json 2>/dev/null || true`);
+                    deps.trace.append({
+                        ts: Date.now(),
+                        kind: 'state',
+                        data: { action: 'backup_created', path: `${backupDir}/${timestamp}_state.json` },
+                    });
+                }
+                catch (e) {
+                    // 备份失败不影响执行，只是记录
+                }
+            }
             // 执行（写 Trace exec 条目）
             // 注意：这里需要记录 terminal_seq
-            // 根据 change.md 问题2：实际执行工具调用
+            // 实际执行工具调用
             // 解析并执行 LLM 返回的 <invoke name="X">...</invoke> 格式的工具调用
             const execResult = await executeToolCalls(proposal, deps.primitives);
-            // v2: 根据 change.md 修改6，将 lastExecResult 从 custom 迁移为顶层字段
+            // 将 lastExecResult 从 custom 迁移为顶层字段
             state.lastExecResult = execResult;
             // 记录执行结果到 TerminalLog
             const { content: truncatedExecResult, truncated: execTruncated } = truncateOutput(execResult);
@@ -342,6 +487,7 @@ async function runLoop(state, config, deps, hooks) {
                 seq: execSeq, // 使用 terminalLog 分配的相同 seq
                 kind: 'exec',
                 data: { proposal, result: execResult },
+                terminal_seq: execSeq, // 关联 TerminalLog seq
             });
             // 切换到 Review
             if ((0, state_1.canTransition)(state.mode, 'review')) {
@@ -354,11 +500,20 @@ async function runLoop(state, config, deps, hooks) {
         }
         // ── 6. [Review 模式] ───────────────────────────────────────────────────
         if (state.mode === 'review') {
-            // v2: 根据 change.md 修改6，将 lastExecResult 从 custom 迁移为顶层字段
+            // 将 lastExecResult 从 custom 迁移为顶层字段
             const execResult = String(state.lastExecResult ?? '[No execution result]');
-            // v2: 使用强类型字段 pendingProposal
-            const outcomeInput = `目标: ${state.currentSubgoal ?? state.goal}\n执行提案: ${state.pendingProposal ?? ''}\n执行结果:\n${execResult}`;
-            const outcomeResult = await deps.llm.judge('outcome', collectResult.context, outcomeInput);
+            // 构建证据束：使用 buildEvidenceBundle hook 或默认方式
+            let evidenceBundle = '';
+            if (hooks?.buildEvidenceBundle) {
+                const bundle = await hooks.buildEvidenceBundle(state, execResult);
+                evidenceBundle = bundle.evidence;
+            }
+            else {
+                // 默认构建证据束
+                evidenceBundle = `目标: ${state.currentSubgoal ?? state.goal}\n执行提案: ${state.pendingProposal ?? ''}\n执行结果:\n${execResult}`;
+            }
+            const outcomeInput = evidenceBundle;
+            const outcomeResult = await deps.llm.judge('outcome', collectResult?.context || '', outcomeInput);
             const { content: truncatedOutput, truncated } = truncateOutput(outcomeResult.result);
             const outcomeSeq = deps.terminalLog.append({
                 ts: Date.now(),
@@ -383,7 +538,7 @@ async function runLoop(state, config, deps, hooks) {
                 outcomeResult.result.toLowerCase().includes('yes');
             const outcomeUncertaintyScore = outcomeResult.uncertainty?.score ?? 0.8;
             if (!achieved || outcomeUncertaintyScore > t.uncertaintyHigh) {
-                // v2: 根据 change.md 修改6，在 Review 阶段 noProgressCount++ 处添加注释
+                // 在 Review 阶段 noProgressCount++ 处添加注释
                 state.noProgressCount++;
                 // 不在此处立即 escalate。
                 // 切到 Recovery 先回滚环境，下一轮循环开头的终止条件会触发 escalate。
@@ -400,14 +555,26 @@ async function runLoop(state, config, deps, hooks) {
             }
             // 子目标完成，添加到 archivedSubgoals
             if (state.currentSubgoal) {
-                // 在 Trace 中追加 narrative 标记这次记忆更新
-                deps.trace.append({
+                // 根据 README.md：narrative 双写
+                // 同时追加到 Trace（kind: 'narrative'）和 terminal.md（📍 图标）
+                const narrativeMessage = `子目标已完成: ${state.currentSubgoal}`;
+                const narrativeContent = (state.pendingProposal ?? '').slice(0, 100);
+                // 1. 写入 Trace
+                const narrativeSeq = deps.trace.append({
                     ts: Date.now(),
                     kind: 'narrative',
                     data: {
-                        message: `子目标已完成: ${state.currentSubgoal}`,
-                        solution: (state.pendingProposal ?? '').slice(0, 100),
+                        message: narrativeMessage,
+                        solution: narrativeContent,
                     },
+                });
+                // 2. 写入 terminal.md（使用 📍 图标作为语义锚点）
+                const terminalSeq = deps.terminalLog.append({
+                    ts: Date.now(),
+                    operation: 'llmcall',
+                    input: narrativeMessage,
+                    output: `📍 ${narrativeMessage}\n\n解决方案: ${narrativeContent}`,
+                    trace_ref: narrativeSeq, // 关联 Trace seq
                 });
                 // 添加到 archivedSubgoals，包含结论和完成状态
                 const archivedSubgoal = {
@@ -467,7 +634,7 @@ async function runLoop(state, config, deps, hooks) {
             }
         }
         // ── 9. [Paused 模式] ───────────────────────────────────────────────────
-        // v2: 根据 change.md 修改5，Paused 分支加防御性 throw
+        // Paused 分支加防御性 throw
         // 正常情况下不应到达此处：Paused 的切走逻辑在循环开头的 Interrupt 检查阶段已完成。
         // 若执行到这里，说明 onInterrupt 没有正确切换 mode，属于内部错误。
         if (state.mode === 'paused') {

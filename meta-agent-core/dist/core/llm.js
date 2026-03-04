@@ -1,10 +1,12 @@
 "use strict";
 // [核心层 / LLM] core/llm.ts — LLMCall（Reason / Judge）+ LLMProvider 接口
+// 修改：添加 proposalValid 字段，支持 AGENT.md section 过滤
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.LLMCall = void 0;
 class LLMCall {
     provider;
     staticContext = ''; // 静态上下文（如 AGENT.md）
+    agentMdSections = {}; // AGENT.md 各 section 内容
     constructor(provider) {
         this.provider = provider;
     }
@@ -14,23 +16,91 @@ class LLMCall {
      */
     setStaticContext(context) {
         this.staticContext = context;
+        this.parseAgentMdSections(context);
+    }
+    /**
+     * 解析 AGENT.md 内容，提取各 section
+     */
+    parseAgentMdSections(content) {
+        const sections = {};
+        // 解析 # [all] 基础上下文
+        const allMatch = content.match(/#\s*\[all\][\s\S]*?(?=#\s*\[|$)/);
+        if (allMatch) {
+            sections.all = allMatch[0].replace('# [all]', '').trim();
+        }
+        // 解析 # [reason] 策略与风险偏好
+        const reasonMatch = content.match(/#\s*\[reason\][\s\S]*?(?=#\s*\[|$)/);
+        if (reasonMatch) {
+            sections.reason = reasonMatch[0].replace('# [reason]', '').trim();
+        }
+        // 解析 # [judge:outcome] 验收标准
+        const judgeOutcomeMatch = content.match(/#\s*\[judge:outcome\][\s\S]*?(?=#\s*\[|$)/);
+        if (judgeOutcomeMatch) {
+            sections.judgeOutcome = judgeOutcomeMatch[0].replace('# [judge:outcome]', '').trim();
+        }
+        // 解析 # [judge:milestone] 里程碑判断标准
+        const judgeMilestoneMatch = content.match(/#\s*\[judge:milestone\][\s\S]*?(?=#\s*\[|$)/);
+        if (judgeMilestoneMatch) {
+            sections.judgeMilestone = judgeMilestoneMatch[0].replace('# [judge:milestone]', '').trim();
+        }
+        // 解析 # [judge:capability] 能力边界
+        const judgeCapabilityMatch = content.match(/#\s*\[judge:capability\][\s\S]*?(?=#\s*\[|$)/);
+        if (judgeCapabilityMatch) {
+            sections.judgeCapability = judgeCapabilityMatch[0].replace('# [judge:capability]', '').trim();
+        }
+        // 解析 # [learned_patterns] 历史提炼的策略参数
+        const learnedMatch = content.match(/#\s*\[learned_patterns\][\s\S]*?(?=#\s*\[|$)/);
+        if (learnedMatch) {
+            sections.learnedPatterns = learnedMatch[0].replace('# [learned_patterns]', '').trim();
+        }
+        this.agentMdSections = sections;
+    }
+    /**
+     * 获取指定类型的 AGENT.md section 内容
+     */
+    getAgentSection(type) {
+        const sectionMap = {
+            'all': 'all',
+            'reason': 'reason',
+            'judgeOutcome': 'judgeOutcome',
+            'judgeMilestone': 'judgeMilestone',
+            'judgeCapability': 'judgeCapability',
+            'learnedPatterns': 'learnedPatterns',
+        };
+        return this.agentMdSections[sectionMap[type]] || '';
     }
     // Reason：发散生成提案
     async reason(context, input) {
-        const staticCtx = this.staticContext ? `\n\n## 静态上下文（AGENT.md）\n${this.staticContext}\n` : '';
+        // 根据 README.md：使用 # [reason] section 作为策略上下文
+        const reasonSection = this.getAgentSection('reason');
+        const allSection = this.getAgentSection('all');
+        const learnedSection = this.getAgentSection('learnedPatterns');
+        const staticCtx = [
+            allSection ? `\n## 基础上下文\n${allSection}` : '',
+            reasonSection ? `\n## 策略与风险偏好\n${reasonSection}` : '',
+            learnedSection ? `\n## 历史经验（只读）\n${learnedSection}` : '',
+        ].filter(Boolean).join('\n');
         const system = `你是一个编码 Agent。请根据 context 完成任务，并在末尾以 JSON 输出：
-{"result": "...", "uncertainty": {"score": 0-1, "reasons": []}, "riskApproved": true/false, "riskReason": "可选的风险说明"}.
-重要提示：如果不确定，优先选择副作用最小的行动。${staticCtx}
+{"result": "...", "uncertainty": {"score": 0-1, "reasons": []}, "riskApproved": true/false, "riskReason": "可选的风险说明", "proposalValid": true/false}.
+重要提示： 
+- 如果不确定，优先选择副作用最小的行动。
+- proposalValid 表示提案格式是否正确、是否可执行。${staticCtx}
 若你的提案中包含工具调用（<invoke> 格式），uncertainty 评分应基于工具调用
 执行后的预期状态来评估，而非将工具调用符号本身视为不确定因素。包含工具
 调用的提案通常意味着需要先获取上下文再做判断，应给予较低的 uncertainty
 评分以允许执行。`;
         const raw = await this.provider.complete(system, `Context:\n${context}\n\nTask:\n${input}`);
-        return this.parseWithUncertaintyAndRisk(raw);
+        return this.parseWithUncertaintyRiskAndValid(raw);
     }
     // Reason（多候选）：uncertainty 高时使用
     async reasonMulti(context, input, n = 3) {
-        const staticCtx = this.staticContext ? `\n\n## 静态上下文（AGENT.md）\n${this.staticContext}\n` : '';
+        // 根据 README.md：使用 # [reason] section 作为策略上下文
+        const reasonSection = this.getAgentSection('reason');
+        const allSection = this.getAgentSection('all');
+        const staticCtx = [
+            allSection ? `\n## 基础上下文\n${allSection}` : '',
+            reasonSection ? `\n## 策略与风险偏好\n${reasonSection}` : '',
+        ].filter(Boolean).join('\n');
         const system = `你是一个编码 Agent。请生成 ${n} 个候选方案，每个方案独立可用。
 以 JSON 输出：{"candidates": ["方案1", "方案2", ...], "uncertainty": {"score": 0-1, "reasons": []}}${staticCtx}
 若你的提案中包含工具调用（<invoke> 格式），uncertainty 评分应基于工具调用
@@ -51,13 +121,29 @@ class LLMCall {
         if (!validTypes.includes(type)) {
             throw new Error(`judge: unknown type "${type}"`);
         }
-        const typeDescriptions = {
-            outcome: '判断子目标是否达成（是/否 + 理由）',
-            milestone: '判断当前完成点是否值得一个 git commit（是/否 + 理由）：判断标准：1. 当前完成点是否可以用一句话独立描述（功能完整性）；2. 回滚到此处是否有意义（可恢复性）；3. 与上次快照之间是否有实质变更',
-            capability: '判断任务是否在 agent 能力和权限范围内（完全可行/部分可行/不可行 + 理由）',
-        };
-        const staticCtx = this.staticContext ? `\n\n## 静态上下文（AGENT.md）\n${this.staticContext}\n` : '';
-        const system = `你是一个裁决 Agent。任务类型：${typeDescriptions[type]}。
+        // 根据 type 使用对应的 AGENT.md section
+        let sectionContent = '';
+        let typeDescription = '';
+        switch (type) {
+            case 'outcome':
+                sectionContent = this.getAgentSection('judgeOutcome');
+                typeDescription = '判断子目标是否达成（是/否 + 理由）';
+                break;
+            case 'milestone':
+                sectionContent = this.getAgentSection('judgeMilestone');
+                typeDescription = '判断当前完成点是否值得一个 git commit（是/否 + 理由）：判断标准：1. 当前完成点是否可以用一句话独立描述（功能完整性）；2. 回滚到此处是否有意义（可恢复性）；3. 与上次快照之间是否有实质变更';
+                break;
+            case 'capability':
+                sectionContent = this.getAgentSection('judgeCapability');
+                typeDescription = '判断任务是否在 agent 能力和权限范围内（完全可行/部分可行/不可行 + 理由）';
+                break;
+        }
+        const allSection = this.getAgentSection('all');
+        const staticCtx = [
+            allSection ? `\n## 基础上下文\n${allSection}` : '',
+            sectionContent ? `\n## ${typeDescription}\n${sectionContent}` : '',
+        ].filter(Boolean).join('\n');
+        const system = `你是一个裁决 Agent。任务类型：${typeDescription}。
 请给出明确结论，并在末尾以 JSON 输出：
 {"decision": "...", "uncertainty": {"score": 0-1, "reasons": []}}${staticCtx}`;
         const raw = await this.provider.complete(system, `Context:\n${context}\n\nInput:\n${input}`);
@@ -86,8 +172,8 @@ class LLMCall {
             };
         }
     }
-    // v2: Reason 输出解析，包含 riskApproved 字段
-    parseWithUncertaintyAndRisk(raw) {
+    // v2: Reason 输出解析，包含 riskApproved 和 proposalValid 字段
+    parseWithUncertaintyRiskAndValid(raw) {
         const jsonStr = this.extractJson(raw);
         try {
             const parsed = JSON.parse(jsonStr);
@@ -98,6 +184,7 @@ class LLMCall {
                     uncertainty: { score: 0.8, reasons: ['JSON 解析失败'] },
                     riskApproved: true, // 解析失败时默认通过，让后续逻辑处理
                     riskReason: 'JSON 解析失败',
+                    proposalValid: true, // 默认认为有效
                 };
             }
             return {
@@ -105,6 +192,7 @@ class LLMCall {
                 uncertainty: parsed.uncertainty,
                 riskApproved: parsed.riskApproved ?? true, // 默认通过
                 riskReason: parsed.riskReason,
+                proposalValid: parsed.proposalValid ?? true, // 新增：默认通过
             };
         }
         catch {
@@ -113,6 +201,7 @@ class LLMCall {
                 uncertainty: { score: 0.8, reasons: ['JSON 解析失败'] },
                 riskApproved: true, // 解析失败时默认通过
                 riskReason: 'JSON 解析失败',
+                proposalValid: true, // 默认认为有效
             };
         }
     }

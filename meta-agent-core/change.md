@@ -1,0 +1,1 @@
+之前我根据meta-agent-core/README_old.md实现了meta-agent-core项目, 现在设计原则和工程规范发生了一些变化, 请你按照meta-agent-core/README.md的设计，修改meta-agent-core项目，使得项目状态和新设计一致。你需要先找到差异的地方，然后再按照meta-agent-core/README.md的指导去改代码。如果真的有不合理的地方你可以自行决定修改，同时更新meta-agent-core/README.md使得项目状态和描述一致。你需要严格测试所有修改，保证没有bug。

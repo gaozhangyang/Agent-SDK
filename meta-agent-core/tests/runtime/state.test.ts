@@ -45,10 +45,13 @@ describe('State', () => {
     const stateManager = new StateManager();
     
     const originalState: AgentState = {
+      sessionId: 'test-session-123',
       goal: 'test goal',
       subgoals: ['sub1', 'sub2'],
       currentSubgoal: 'sub1',
+      currentSubgoal_src: 'T#1',
       archivedSubgoals: [],
+      completedToolCalls: [],
       mode: 'execute',
       permissions: 3,
       iterationCount: 5,

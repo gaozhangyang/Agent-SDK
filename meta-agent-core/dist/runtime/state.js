@@ -7,6 +7,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.StateManager = exports.MODE_TRANSITIONS = void 0;
 exports.canTransition = canTransition;
 exports.createInitialState = createInitialState;
+exports.generateSessionId = generateSessionId;
 const promises_1 = __importDefault(require("fs/promises"));
 const path_1 = __importDefault(require("path"));
 // Mode 合法切换表
@@ -39,11 +40,25 @@ class StateManager {
             const content = await promises_1.default.readFile(statePath, 'utf-8');
             const parsed = JSON.parse(content);
             // 填充缺失的字段（向后兼容）
+            if (!parsed.sessionId) {
+                // 旧版本没有 sessionId，生成一个新的
+                parsed.sessionId = `sess_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+            }
             if (!parsed.archivedSubgoals) {
                 parsed.archivedSubgoals = [];
             }
+            if (!parsed.completedToolCalls) {
+                parsed.completedToolCalls = [];
+            }
             if (!parsed.custom) {
                 parsed.custom = {};
+            }
+            if (!parsed.environmentCapabilities) {
+                parsed.environmentCapabilities = {
+                    networkAvailable: false,
+                    writePermission: true,
+                    availableTools: ['read', 'write', 'edit', 'bash'],
+                };
             }
             return parsed;
         }
@@ -76,23 +91,37 @@ class StateManager {
      * 创建初始 State
      */
     createInitial(goal, permissions = 2) {
+        // 生成 sessionId（使用时间戳 + 随机字符串）
+        const sessionId = `sess_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
         return {
+            sessionId,
             goal,
             subgoals: [],
             currentSubgoal: null,
+            currentSubgoal_src: undefined,
             archivedSubgoals: [],
+            completedToolCalls: [],
             mode: 'plan',
             permissions,
             iterationCount: 0,
             noProgressCount: 0,
             version: 0,
+            environmentCapabilities: {
+                networkAvailable: false,
+                writePermission: true,
+                availableTools: ['read', 'write', 'edit', 'bash'],
+            },
             custom: {},
         };
     }
 }
 exports.StateManager = StateManager;
-// 兼容 v1 的调用方式
+// 兼容调用方式
 function createInitialState(goal, permissions = 2) {
     return new StateManager().createInitial(goal, permissions);
+}
+// 生成新的 sessionId
+function generateSessionId() {
+    return `sess_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }
 //# sourceMappingURL=state.js.map

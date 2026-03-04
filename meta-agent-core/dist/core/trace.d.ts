@@ -37,6 +37,7 @@ export type TerminalEntry = {
     durationMs?: number;
     dry_run?: boolean;
     truncated?: boolean;
+    trace_ref?: number;
 };
 /**
  * 全局序号管理器 - 统一 seq 序号空间

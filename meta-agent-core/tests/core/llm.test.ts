@@ -97,7 +97,7 @@ describe('LLMCall', () => {
       '{"decision": "pass", "uncertainty": {"score": 0.1, "reasons": []}}'
     );
 
-    const result = await llm.judge('risk', 'context', 'input');
+    const result = await llm.judge('outcome', 'context', 'input');
 
     expect(result.result).toBe('pass');
   });

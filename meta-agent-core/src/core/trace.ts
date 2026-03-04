@@ -52,6 +52,7 @@ export type TerminalEntry = {
   durationMs?: number;        // 耗时（可选）
   dry_run?: boolean;           // Dry-run 标记（预留，默认 false）
   truncated?: boolean;         // 输出是否被截断
+  trace_ref?: number;          // 关联的 Trace seq（两级检索跳转用）
 };
 
 /**
