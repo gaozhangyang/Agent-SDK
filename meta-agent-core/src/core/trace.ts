@@ -293,24 +293,26 @@ export class TerminalLog {
     return date.toTimeString().slice(0, 8);
   }
 
-  /**
-   * 将 TerminalEntry 转换为人类友好的 Markdown 格式
-   * 
-   * 修改：采用 terminal.md 格式
-   * - 路径别名
-   * - 操作图标：📖 read · ✏️ write · 🔧 edit · 💻 bash · 🔍 collect · 🤖 llmcall
-   * - 折叠块：<details> 收纳 input/output 正文
-   * - 截断引用
-   * - 耗时标注
-   * 
-   * Markdown 渲染规则：
-   * 1. 表格前后必须有空行
-   * 2. 表格必须有分隔符行（|---|---|）
-   * 3. 表格单元格只放单行纯文本，截断用省略号
-   * 4. 多行内容、含 Markdown 语法的内容全部放进 <details> 块
-   * 5. </details> 后必须有空行，再写下一个 ## 标题
-   */
-  private formatAsMarkdown(entry: TerminalEntry): string {
+    /**
+     * 将 TerminalEntry 转换为人类友好的 Markdown 格式
+     * 
+     * 修改：根据 change.md 要求
+     * - terminal.md不需要展示完整的输入输出, 只记录输入输出的来源即可
+     * - 比如阅读了什么文件、参考了trace里面的第几行
+     * - 路径别名
+     * - 操作图标：📖 read · ✏️ write · 🔧 edit · 💻 bash · 🔍 collect · 🤖 llmcall
+     * - 折叠块：<details> 收纳 input/output 正文（可选，通过开关控制）
+     * - 截断引用
+     * - 耗时标注
+     * 
+     * Markdown 渲染规则：
+     * 1. 表格前后必须有空行
+     * 2. 表格必须有分隔符行（|---|---|）
+     * 3. 表格单元格只放单行纯文本，截断用省略号
+     * 4. 多行内容、含 Markdown 语法的内容全部放进 <details> 块
+     * 5. </details> 后必须有空行，再写下一个 ## 标题
+     */
+    private formatAsMarkdown(entry: TerminalEntry): string {
     const ts = this.formatTimestamp(entry.ts);
     const seq = String(entry.seq).padStart(3, '0');
     
@@ -383,59 +385,60 @@ export class TerminalLog {
     
     switch (entry.operation) {
       case 'llmcall':
-        // LLM 调用
+        // LLM 调用 - 只显示输入来源，不显示完整内容
         const inputPreview = toSingleLine(entry.input || '', 100);
-        const outputPreview = toSingleLine(entry.output, 200);
-        content = `| input  | ${inputPreview} |\n| --- | --- |\n| output | ${outputPreview}${truncatedRef} |`;
+        // 根据 change.md: 只记录输入输出的来源
+        // 如果有 trace_ref，显示关联的 trace seq
+        const traceRef = entry.trace_ref ? ` [trace#${entry.trace_ref}]` : '';
+        content = `| input  | ${inputPreview}${traceRef} |\n| --- | --- |\n| output | ${entry.output ? '[LLM response]' : '[empty]'}${truncatedRef} |`;
         
         // 如果有 uncertainty，显示出来
         if (entry.durationMs !== undefined) {
           content += `\n| --- | --- |\n| duration | ${entry.durationMs}ms |`;
         }
         
-        // 检查是否需要 <details> 块
-        hasFullContent = needsDetailsBlock(entry.input || '') || needsDetailsBlock(entry.output);
+        // 不再显示完整内容
+        hasFullContent = false;
         break;
         
       case 'collect':
-        // Collect 操作
+        // Collect 操作 - 只显示查询来源，不显示完整结果
         const collectQuery = toSingleLine(shortPath || entry.input || '', 100);
-        const collectResult = toSingleLine(entry.output, 200);
-        content = `| query  | ${collectQuery} |\n| --- | --- |\n| result | ${collectResult}${truncatedRef} |`;
-        hasFullContent = needsDetailsBlock(entry.input || '') || needsDetailsBlock(entry.output);
+        // 只显示来源数量和简要信息
+        const sourceCount = entry.input ? (entry.input.match(/"type"/g) || []).length : 0;
+        content = `| query  | ${collectQuery} |\n| --- | --- |\n| sources | ${sourceCount} sources collected${truncatedRef} |`;
+        hasFullContent = false;
         break;
         
       case 'read':
-        // 文件读取
+        // 文件读取 - 只显示文件路径，不显示内容
         const readPath = toSingleLine(shortPath, 100);
-        const readContent = toSingleLine(entry.output, 200);
-        content = `| path   | ${readPath} |\n| --- | --- |\n| content | ${readContent}${truncatedRef} |`;
-        hasFullContent = needsDetailsBlock(entry.output);
+        // 根据 change.md: 只记录输入输出的来源
+        content = `| path   | ${readPath} |\n| --- | --- |\n| content | [read ${entry.output.length} bytes]${truncatedRef} |`;
+        hasFullContent = false;
         break;
         
       case 'write':
-        // 文件写入
+        // 文件写入 - 只显示文件路径
         const writePath = toSingleLine(shortPath, 100);
-        const writeResult = toSingleLine(entry.output, 200);
-        content = `| path   | ${writePath} |\n| --- | --- |\n| result | ${writeResult} |`;
-        hasFullContent = needsDetailsBlock(entry.output);
+        content = `| path   | ${writePath} |\n| --- | --- |\n| result | [written] |`;
+        hasFullContent = false;
         break;
         
       case 'edit':
-        // 文件编辑
+        // 文件编辑 - 只显示文件路径
         const editPath = toSingleLine(shortPath, 100);
-        const editResult = toSingleLine(entry.output, 200);
-        content = `| path   | ${editPath} |\n| --- | --- |\n| result | ${editResult} |`;
-        hasFullContent = needsDetailsBlock(entry.output);
+        content = `| path   | ${editPath} |\n| --- | --- |\n| result | [edited] |`;
+        hasFullContent = false;
         break;
         
       case 'bash':
-        // Bash 命令
+        // Bash 命令 - 只显示命令，不显示输出内容
         const exitInfo = entry.exitCode !== undefined ? ` (exit=${entry.exitCode})` : '';
         const bashCmd = toSingleLine(entry.command || '', 100);
-        const bashOutput = toSingleLine(entry.output, 200);
-        content = `| cmd    | ${bashCmd} |\n| --- | --- |\n| output | ${bashOutput}${exitInfo}${truncatedRef} |`;
-        hasFullContent = needsDetailsBlock(entry.command || '') || needsDetailsBlock(entry.output);
+        // 根据 change.md: 只记录命令来源，不显示完整输出
+        content = `| cmd    | ${bashCmd} |\n| --- | --- |\n| output | [executed]${exitInfo}${truncatedRef} |`;
+        hasFullContent = false;
         break;
     }
     
@@ -447,53 +450,8 @@ export class TerminalLog {
       content,
     ];
     
-    // 规则4: 多行内容、含 Markdown 语法的内容放进 <details> 块
-    // 注意：内层代码块使用四个反引号，避免与外层 Markdown 环境冲突
-    // 修改：使用两个独立的折叠块，分别显示 input 和 output
-    if (hasFullContent) {
-      // 分别检查 input 和 output 是否需要放进 details 块
-      const needsInputDetails = entry.input && needsDetailsBlock(entry.input);
-      const needsOutputDetails = entry.output && needsDetailsBlock(entry.output);
-
-      if (needsInputDetails && entry.input) {
-        lines.push('');
-        lines.push('<details><summary>完整的input</summary>');
-        lines.push('');
-        lines.push('### input');
-        lines.push('');
-        lines.push('````');
-        lines.push(entry.input);
-        lines.push('````');
-        lines.push('');
-        lines.push('</details>');
-      }
-
-      if (needsOutputDetails) {
-        lines.push('');
-        lines.push('<details><summary>完整的output</summary>');
-        lines.push('');
-        lines.push('### output');
-        lines.push('');
-        // 如果是模板内容，用 markdown 代码块包裹（避免 h1 标题污染层级）
-        if (isTemplateContent(entry.output)) {
-          lines.push('````markdown');
-          lines.push(entry.output);
-          lines.push('````');
-        } else {
-          lines.push('````');
-          lines.push(entry.output);
-          lines.push('````');
-        }
-        lines.push('');
-        lines.push('</details>');
-      }
-
-      // 只有当 input 或 output 有内容时才添加空行
-      if (needsInputDetails || needsOutputDetails) {
-        // 规则5: </details> 后必须有空行
-        lines.push('');
-      }
-    }
+    // 根据 change.md: 只记录输入输出的来源，不显示完整内容
+    // 已简化：不再使用 <details> 块显示完整内容
     
     return lines.join('\n');
   }

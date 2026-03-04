@@ -136,10 +136,12 @@ export declare class TerminalLog {
     /**
      * 将 TerminalEntry 转换为人类友好的 Markdown 格式
      *
-     * 修改：采用 terminal.md 格式
+     * 修改：根据 change.md 要求
+     * - terminal.md不需要展示完整的输入输出, 只记录输入输出的来源即可
+     * - 比如阅读了什么文件、参考了trace里面的第几行
      * - 路径别名
      * - 操作图标：📖 read · ✏️ write · 🔧 edit · 💻 bash · 🔍 collect · 🤖 llmcall
-     * - 折叠块：<details> 收纳 input/output 正文
+     * - 折叠块：<details> 收纳 input/output 正文（可选，通过开关控制）
      * - 截断引用
      * - 耗时标注
      *

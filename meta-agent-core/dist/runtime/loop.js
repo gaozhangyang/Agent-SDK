@@ -102,7 +102,7 @@ exports.DEFAULT_THRESHOLDS = {
     confidenceMid: 0.6,
     uncertaintyHigh: 0.7,
     maxNoProgress: 3,
-    maxIterations: 50,
+    maxIterations: 30,
 };
 const DEFAULT_CONTEXT_BUDGET = {
     total: 200000,

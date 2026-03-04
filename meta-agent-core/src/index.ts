@@ -191,7 +191,7 @@ export interface AgentThresholdsConfig {
   confidenceMid?: number;     // 置信度中阈值（默认 0.6）
   uncertaintyHigh?: number;    // 不确定性高阈值（默认 0.7）
   maxNoProgress?: number;      // 最大无进展次数（默认 3）
-  maxIterations?: number;      // 最大迭代次数（默认 50）
+  maxIterations?: number;      // 最大迭代次数（默认 30）
 }
 
 /**

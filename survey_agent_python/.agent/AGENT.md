@@ -39,6 +39,7 @@ survey_agent_python/
 ```
 
 > **注意**：以下目录在运行时会自动创建或使用（无需初始化包含）：
+>
 > - `data/` - 运行时数据（原始论文、筛选结果、PDF 等）
 > - `knowledge_base/` - 知识板块目录
 > - `templates/` - 模板目录
@@ -47,11 +48,13 @@ survey_agent_python/
 
 Survey Agent 使用 `Collect` 协议获取上下文。检索范围明确包括：
 
-| 来源类型 | 说明 | 典型用途 |
-|---------|------|---------|
-| file | 读取指定文件 | 模板、知识库文档 |
-| trace_tag | 按标签过滤 Trace 历史 | 获取特定类型的推理记录 |
-| skills | 从 skills/ 目录检索技能文档 | 获取工具使用说明、最佳实践 |
+
+| 来源类型      | 说明                 | 典型用途          |
+| --------- | ------------------ | ------------- |
+| file      | 读取指定文件             | 模板、知识库文档      |
+| trace_tag | 按标签过滤 Trace 历史     | 获取特定类型的推理记录   |
+| skills    | 从 skills/ 目录检索技能文档 | 获取工具使用说明、最佳实践 |
+
 
 **注意：** Memory（长期记忆）在子目标完成时自动记录，通过 `memory.search(query)` 方法检索，不通过 Collect 协议。
 
@@ -87,25 +90,15 @@ skills/
 ```
 
 **注意：** 在 Collect 配置中使用 `type: "skills"` 时，query 会解析到对应的 `skills/<name>/SKILL.md`。例如：
+
 - `query: "writing"` -> `skills/writing/SKILL.md`
 - `query: "pdf_extract"` -> `skills/pdf_extract/SKILL.md`
 
 **pdf_extract 技能说明：**
+
 - 用于将 PDF 路径转换为纯文本，供分析/总结使用
 - 支持指定页码范围、最大页数、布局保留等选项
 - 输出可直接在 Collect 配置中作为 file 来源使用
-
-## Mode 状态机
-
-遵循 `agent-design-principles-v2.md` 的标准 Mode 状态机：
-
-```
-plan     → execute    # 方案通过 Judge(risk)
-execute  → review     # 当前批次动作完成
-review   → plan       # 目标变化或需重新规划
-任意      → recovery  # 连续失败 / 快照失败
-任意      → paused    # Interrupt 信号到达
-```
 
 ## 权限级别
 
@@ -145,6 +138,7 @@ review   → plan       # 目标变化或需重新规划
 ```
 
 **重要**：
+
 - 必须使用 `<invoke name="...">` 格式包裹工具调用
 - 每个参数必须使用 `<parameter name="参数名">参数值</parameter>` 格式
 - 不要输出纯文本格式的命令（如 `bash cd /path && ls`），否则命令将不会被执行
@@ -192,8 +186,8 @@ review   → plan       # 目标变化或需重新规划
     "confidenceLow": 0.3,
     "confidenceMid": 0.6,
     "uncertaintyHigh": 0.85,
-    "maxNoProgress": 10,
-    "maxIterations": 100
+    "maxNoProgress": 3,
+    "maxIterations": 20
   },
   "strategies": {
     "level": "L1",
@@ -215,15 +209,18 @@ review   → plan       # 目标变化或需重新规划
 
 ### 阈值配置说明
 
-| 阈值项 | 说明 | 生效环节 | 触发场景 | 默认值 |
-|--------|------|----------|----------|--------|
-| confidenceLow | 置信度低阈值 | Collect 阶段 | 收集的上下文覆盖度(coverage)或可靠性(reliability)低于此值时，触发 Escalate | 0.3 |
-| confidenceMid | 置信度中阈值 | Collect 阶段 | 用于内部判断，当前仅作为参考阈值 | 0.6 |
-| uncertaintyHigh | 不确定性高阈值 | Plan/Reason 阶段和 Review/Judge 阶段 | LLM 推理的 uncertainty.score 高于此值，或 Judge 判断不确定性过高时，触发 Escalate | 0.7 |
-| maxNoProgress | 最大无进展次数 | Review 阶段 | 连续多次迭代未达成目标（achieved=false 或 uncertainty 过高）时累加，达到此值后触发 Escalate | 10 |
-| maxIterations | 最大迭代次数 | 循环入口 | 整个任务的总迭代次数达到此值后，任务以 budget_exceeded 状态终止 | 100 |
+
+| 阈值项             | 说明      | 生效环节                            | 触发场景                                                             | 默认值 |
+| --------------- | ------- | ------------------------------- | ---------------------------------------------------------------- | --- |
+| confidenceLow   | 置信度低阈值  | Collect 阶段                      | 收集的上下文覆盖度(coverage)或可靠性(reliability)低于此值时，触发 Escalate            | 0.3 |
+| confidenceMid   | 置信度中阈值  | Collect 阶段                      | 用于内部判断，当前仅作为参考阈值                                                 | 0.6 |
+| uncertaintyHigh | 不确定性高阈值 | Plan/Reason 阶段和 Review/Judge 阶段 | LLM 推理的 uncertainty.score 高于此值，或 Judge 判断不确定性过高时，触发 Escalate     | 0.7 |
+| maxNoProgress   | 最大无进展次数 | Review 阶段                       | 连续多次迭代未达成目标（achieved=false 或 uncertainty 过高）时累加，达到此值后触发 Escalate | 10  |
+| maxIterations   | 最大迭代次数  | 循环入口                            | 整个任务的总迭代次数达到此值后，任务以 budget_exceeded 状态终止                         | 30  |
+
 
 > **各阈值的详细作用场景**：
+>
 > - **confidenceLow**：在 Collect 阶段结束后检查。如果收集到的上下文覆盖度或可靠性低于此值，说明 Agent 没有足够的信息来完成任务，此时触发 Escalate 将问题上报。
 > - **confidenceMid**：作为参考阈值，目前主要用于内部判断，未来可能用于更细粒度的策略调整。
 > - **uncertaintyHigh**：在两个阶段检查：(1) Plan 阶段的 LLM Reason 调用返回后，检查 uncertainty.score；(2) Review 阶段的 Judge(outcome) 调用返回后，检查 outcome uncertainty。如果超过此阈值，触发 Escalate。
@@ -234,29 +231,33 @@ review   → plan       # 目标变化或需重新规划
 
 ### 策略层配置说明
 
-| 策略项 | 说明 | 可选值 |
-|--------|------|--------|
-| level | 基础策略包，决定默认启用范围 | L0, L1, L2, L3 |
-| permissions | 初始权限级别（0-4），定义 Agent 可执行的操作范围 | 0-4 |
-| mode_fsm | Mode 状态机（Plan/Execute/Review/Recovery/Paused） | enabled, disabled |
-| permission_fsm | 权限状态机（Level 0-4） | enabled, disabled |
-| harness | 快照策略 | standard, aggressive, disabled |
-| error_classifier | 错误分类（retryable / logic / environment / budget） | enabled, disabled |
-| judge.outcome | Loop 终止收敛（不可关闭，可降级为 rule_based） | required, rule_based, disabled |
-| judge.risk | 高权限操作门卫 | enabled, disabled |
-| judge.milestone | git commit 时机判断 | enabled, disabled |
-| judge.capability | 启动时能力边界声明 | enabled, disabled |
-| judge.selection | 多候选仲裁 | enabled, disabled |
+
+| 策略项              | 说明                                             | 可选值                            |
+| ---------------- | ---------------------------------------------- | ------------------------------ |
+| level            | 基础策略包，决定默认启用范围                                 | L0, L1, L2, L3                 |
+| permissions      | 初始权限级别（0-4），定义 Agent 可执行的操作范围                  | 0-4                            |
+| mode_fsm         | Mode 状态机（Plan/Execute/Review/Recovery/Paused）  | enabled, disabled              |
+| permission_fsm   | 权限状态机（Level 0-4）                               | enabled, disabled              |
+| harness          | 快照策略                                           | standard, aggressive, disabled |
+| error_classifier | 错误分类（retryable / logic / environment / budget） | enabled, disabled              |
+| judge.outcome    | Loop 终止收敛（不可关闭，可降级为 rule_based）                | required, rule_based, disabled |
+| judge.risk       | 高权限操作门卫                                        | enabled, disabled              |
+| judge.milestone  | git commit 时机判断                                | enabled, disabled              |
+| judge.capability | 启动时能力边界声明                                      | enabled, disabled              |
+| judge.selection  | 多候选仲裁                                          | enabled, disabled              |
+
 
 **权限级别说明：**
 
-| 级别 | 名称 | 允许的操作 |
-|------|------|-----------|
-| 0 | 只读 | read |
-| 1 | 受控写 | write/edit（限工作区） |
-| 2 | 受控执行 | bash（常规命令，无网络/删除） |
-| 3 | 高风险执行 | bash（网络、删除、系统级变更） |
-| 4 | 自主模式 | 预授权范围内自动执行 |
+
+| 级别  | 名称    | 允许的操作             |
+| --- | ----- | ----------------- |
+| 0   | 只读    | read              |
+| 1   | 受控写   | write/edit（限工作区）  |
+| 2   | 受控执行  | bash（常规命令，无网络/删除） |
+| 3   | 高风险执行 | bash（网络、删除、系统级变更） |
+| 4   | 自主模式  | 预授权范围内自动执行        |
+
 
 > Survey Agent 需要从 arXiv API 获取论文，因此需要权限级别 3。
 
@@ -281,20 +282,24 @@ review   → plan       # 目标变化或需重新规划
 **目标**：从 arXiv API 抓取指定分类的最新论文。
 
 **配置来源**：
+
 - 优先参考 `skills/arxiv_api/SKILL.md`
 - 从本 AGENT.md 的「运行时配置」中读取 `fetch_max_papers` 和 topics 的 `arxiv_categories`
 
 **调用参数**：
+
 - `categories`: arXiv 分类列表（如 `cs.CV`, `cs.LG`）
 - `max_results`: 最大抓取数量（默认 10）
 - `start_date`: 开始日期 (YYYYMMDD)
 - `end_date`: 结束日期 (YYYYMMDD)
 
 **输出约定**：
+
 - 将原始结果写入 `data/raw_papers_{YYYY-MM-DD}.json`
 - 输出格式参考 `skills/arxiv_api/SKILL.md`
 
 **调用方式**：
+
 ```bash
 python skills/arxiv_api/fetch_arxiv.py -c cs.CV,cs.LG -m 10 -o data/raw_papers_2026-03-03.json
 ```
@@ -304,19 +309,23 @@ python skills/arxiv_api/fetch_arxiv.py -c cs.CV,cs.LG -m 10 -o data/raw_papers_2
 **目标**：基于用户兴趣配置和知识库关键词筛选论文。
 
 **配置来源**：
+
 - 优先参考 `skills/screening/SKILL.md`
 - 从本 AGENT.md 的「运行时配置」中读取 topics 和 screening_threshold
 - 读取 `knowledge_base/{topic}/meta.json`
 - 读取 `data/blacklist.json`
 
 **输入**：
+
 - `raw_papers_{YYYY-MM-DD}.json`（Fetcher 阶段的输出）
 
 **输出约定**：
+
 - 写入 `data/selected_papers_{YYYY-MM-DD}.json`
 - 输出结构沿用 `skills/screening/SKILL.md` 的格式
 
 **调用方式**：
+
 ```bash
 python skills/screening/screen_papers.py data/raw_papers_2026-03-03.json data/selected_papers_2026-03-03.json \
   --topics knowledge_base \
@@ -332,25 +341,25 @@ python skills/screening/screen_papers.py data/raw_papers_2026-03-03.json data/se
 **对每一篇论文，按如下顺序操作**：
 
 1. **下载 PDF**（如果本地没有）：
-   - PDF 存储路径：`data/pdfs/{arxiv_id}.pdf`
-   - 可参考 `scripts/download_pdf.py`
-
-2. **可选：提取 PDF 文本**：
-   - 使用 `skills/pdf_extract/extract_text.py`
-   - 输出到 `data/pdfs/{arxiv_id}.txt`（可选）
-
+  - PDF 存储路径：`data/pdfs/{arxiv_id}.pdf`
+  - 可参考 `scripts/download_pdf.py`
+2. **提取 PDF 文本**：
+  - 使用 `skills/pdf_extract/extract_text.py`
+  - 输出到 `data/pdfs/{arxiv_id}.txt`
 3. **生成论文总结**：
-   - 使用 meta-agent-core SDK 和 `skills/writing/`
-   - 写入 `knowledge_base/{topic}/paper_{arxiv_id}.md`
-   - 更新 `knowledge_base/{topic}/meta.json`
+  - 使用 meta-agent-core SDK 和 `skills/writing/`
+  - 写入 `knowledge_base/{topic}/paper_{arxiv_id}.md`
+  - 更新 `knowledge_base/{topic}/meta.json`
 
 **CollectConfig 的典型组成**：
+
 - 模板文件：`templates/paper_summary.md`
 - 对应 topic 的 `knowledge_base/{topic}/meta.json`
 - PDF 文件或提取出的文本文件
 - `skills/writing/SKILL.md`
 
 **SDK 调用示例**：
+
 ```python
 result = sdk.run(
     goal=f"深度分析论文 {arxiv_id}，PDF已下载到 {pdf_path}，"
@@ -371,14 +380,16 @@ result = sdk.run(
 
 ### 目录与文件约定
 
-| 类型 | 路径 | 说明 |
-|------|------|------|
-| 原始论文 | `data/raw_papers_{YYYY-MM-DD}.json` | Fetcher 输出 |
-| 筛选后论文 | `data/selected_papers_{YYYY-MM-DD}.json` | Screener 输出 |
-| PDF 文件 | `data/pdfs/{arxiv_id}.pdf` | 论文 PDF |
-| PDF 文本 | `data/pdfs/{arxiv_id}.txt` | 可选提取文本 |
-| 论文总结 | `knowledge_base/{topic}/paper_{arxiv_id}.md` | Analyst 输出 |
-| 知识库元信息 | `knowledge_base/{topic}/meta.json` | 板块元信息 |
+
+| 类型     | 路径                                           | 说明          |
+| ------ | -------------------------------------------- | ----------- |
+| 原始论文   | `data/raw_papers_{YYYY-MM-DD}.json`          | Fetcher 输出  |
+| 筛选后论文  | `data/selected_papers_{YYYY-MM-DD}.json`     | Screener 输出 |
+| PDF 文件 | `data/pdfs/{arxiv_id}.pdf`                   | 论文 PDF      |
+| PDF 文本 | `data/pdfs/{arxiv_id}.txt`                   | 可选提取文本      |
+| 论文总结   | `knowledge_base/{topic}/paper_{arxiv_id}.md` | Analyst 输出  |
+| 知识库元信息 | `knowledge_base/{topic}/meta.json`           | 板块元信息       |
+
 
 ### 设计原则
 
@@ -386,3 +397,4 @@ result = sdk.run(
 2. **Skills 作为可组合能力单元**：每个 Skill 独立定义职责，通过 CollectConfig 组合使用
 3. **Python 薄封装**：Python 代码只提供运行时容器、API 接口和少量胶水逻辑
 4. **修改优先序**：业务逻辑修改应优先改 AGENT.md 和 skills，而不是改 Python 源码
+

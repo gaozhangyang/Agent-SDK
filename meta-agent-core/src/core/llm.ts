@@ -126,13 +126,18 @@ export class LLMCall {
 
     const system = `你是一个编码 Agent。请根据 context 完成任务，并在末尾以 JSON 输出：
 {"result": "...", "uncertainty": {"score": 0-1, "reasons": []}, "riskApproved": true/false, "riskReason": "可选的风险说明", "proposalValid": true/false}.
-重要提示： 
-- 如果不确定，优先选择副作用最小的行动。
-- proposalValid 表示提案格式是否正确、是否可执行。${staticCtx}
+重要提示：
+1. 如果不确定，优先选择副作用最小的行动。
+2. proposalValid 表示提案格式是否正确、是否可执行。
+3. 你必须使用 <invoke name="工具名"> 格式来执行实际操作，不能只做分析。
+4. 如果需要读取文件或执行命令，必须实际调用工具，不要只是描述要做什么。
+5. Context 中已提供 AGENT.md 和 skills 的内容，请按照其中的 workflow 执行任务。
+6. 工作目录是 survey_agent_python/，所有路径都相对于该目录。
+7. 执行顺序：先 fetcher(arXiv API) → 再 screener(筛选) → 最后 analyst(分析写入知识库)。
 若你的提案中包含工具调用（<invoke> 格式），uncertainty 评分应基于工具调用
 执行后的预期状态来评估，而非将工具调用符号本身视为不确定因素。包含工具
 调用的提案通常意味着需要先获取上下文再做判断，应给予较低的 uncertainty
-评分以允许执行。`;
+评分以允许执行。${staticCtx}`;
     const raw = await this.provider.complete(system, `Context:\n${context}\n\nTask:\n${input}`);
     return this.parseWithUncertaintyRiskAndValid(raw);
   }
@@ -236,7 +241,7 @@ export class LLMCall {
           result: raw,
           uncertainty: { score: 0.8, reasons: ['JSON 解析失败'] },
           riskApproved: true, // 解析失败时默认通过，让后续逻辑处理
-          riskReason: 'JSON 解析失败',
+          riskReason: undefined, // 不设置误导性的 riskReason
           proposalValid: true, // 默认认为有效
         };
       }
@@ -252,7 +257,7 @@ export class LLMCall {
         result: raw,
         uncertainty: { score: 0.8, reasons: ['JSON 解析失败'] },
         riskApproved: true, // 解析失败时默认通过
-        riskReason: 'JSON 解析失败',
+        riskReason: undefined, // 不设置误导性的 riskReason
         proposalValid: true, // 默认认为有效
       };
     }
