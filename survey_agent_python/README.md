@@ -142,15 +142,20 @@ python run.py
 }
 ```
 
-| 阈值项 | 说明 | 默认值 |
-|--------|------|--------|
-| confidenceLow | 置信度低阈值，低于此值将触发Escalate | 0.3 |
-| confidenceMid | 置信度中阈值 | 0.6 |
-| uncertaintyHigh | 不确定性高阈值，超过此值将触发Escalate | 0.7 |
-| maxCollectRetry | 最大收集重试次数 | 3 |
-| maxNoProgress | 最大无进展次数，超过此值将触发Escalate | 3 |
-| maxIterations | 最大迭代次数，超过此值任务终止 | 50 |
-```
+| 阈值项 | 说明 | 生效环节 | 触发场景 | 默认值 |
+|--------|------|----------|----------|--------|
+| confidenceLow | 置信度低阈值 | Collect 阶段 | 收集的上下文覆盖度(coverage)或可靠性(reliability)低于此值时，触发 Escalate | 0.3 |
+| confidenceMid | 置信度中阈值 | Collect 阶段 | 用于内部判断，当前仅作为参考阈值 | 0.6 |
+| uncertaintyHigh | 不确定性高阈值 | Plan/Reason 阶段和 Review/Judge 阶段 | LLM 推理的 uncertainty.score 高于此值，或 Judge 判断不确定性过高时，触发 Escalate | 0.7 |
+| maxNoProgress | 最大无进展次数 | Review 阶段 | 连续多次迭代未达成目标（achieved=false 或 uncertainty 过高）时累加，达到此值后触发 Escalate | 10 |
+| maxIterations | 最大迭代次数 | 循环入口 | 整个任务的总迭代次数达到此值后，任务以 budget_exceeded 状态终止 | 100 |
+
+> **各阈值的详细作用场景**：
+> - **confidenceLow**：在 Collect 阶段结束后检查。如果收集到的上下文覆盖度或可靠性低于此值，说明 Agent 没有足够的信息来完成任务，此时触发 Escalate 将问题上报。
+> - **confidenceMid**：作为参考阈值，目前主要用于内部判断，未来可能用于更细粒度的策略调整。
+> - **uncertaintyHigh**：在两个阶段检查：(1) Plan 阶段的 LLM Reason 调用返回后，检查 uncertainty.score；(2) Review 阶段的 Judge(outcome) 调用返回后，检查 outcome uncertainty。如果超过此阈值，触发 Escalate。
+> - **maxNoProgress**：在 Review 阶段检查。当 Judge 判断目标未达成（achieved=false）或不确定性过高时，noProgressCount 累加。连续多次无进展后触发 Escalate，避免 Agent 在死循环中消耗资源。
+> - **maxIterations**：在每次循环开始时检查。当 iterationCount 达到此值时，任务以 budget_exceeded 状态终止，确保任务不会无限运行下去。
 
 ## 定制 Survey Agent
 

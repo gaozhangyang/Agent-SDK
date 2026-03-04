@@ -43,7 +43,6 @@ export type RunRequestBody = {
     uncertaintyHigh?: number;
     maxIterations?: number;
     maxNoProgress?: number;
-    maxCollectRetry?: number;
   };
   debug?: boolean;  // 调试模式开关
   resume?: boolean; // 是否恢复之前的 Session，默认 true

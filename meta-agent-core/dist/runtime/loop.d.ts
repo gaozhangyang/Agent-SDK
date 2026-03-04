@@ -11,7 +11,6 @@ export declare const DEFAULT_THRESHOLDS: {
     confidenceLow: number;
     confidenceMid: number;
     uncertaintyHigh: number;
-    maxCollectRetry: number;
     maxNoProgress: number;
     maxIterations: number;
 };

@@ -102,7 +102,6 @@ export const DEFAULT_THRESHOLDS = {
   confidenceLow: 0.3,
   confidenceMid: 0.6,
   uncertaintyHigh: 0.7,
-  maxCollectRetry: 3,
   maxNoProgress: 3,
   maxIterations: 50,
 };

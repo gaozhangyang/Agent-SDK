@@ -55,7 +55,6 @@ export interface AgentThresholdsConfig {
     confidenceLow?: number;
     confidenceMid?: number;
     uncertaintyHigh?: number;
-    maxCollectRetry?: number;
     maxNoProgress?: number;
     maxIterations?: number;
 }

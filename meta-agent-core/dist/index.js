@@ -178,9 +178,6 @@ function parseThresholdsConfig(agentMdContent) {
             if (typeof parsed.thresholds.uncertaintyHigh === 'number') {
                 thresholds.uncertaintyHigh = parsed.thresholds.uncertaintyHigh;
             }
-            if (typeof parsed.thresholds.maxCollectRetry === 'number') {
-                thresholds.maxCollectRetry = parsed.thresholds.maxCollectRetry;
-            }
             if (typeof parsed.thresholds.maxNoProgress === 'number') {
                 thresholds.maxNoProgress = parsed.thresholds.maxNoProgress;
             }

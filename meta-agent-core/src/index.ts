@@ -190,7 +190,6 @@ export interface AgentThresholdsConfig {
   confidenceLow?: number;      // 置信度低阈值（默认 0.3）
   confidenceMid?: number;     // 置信度中阈值（默认 0.6）
   uncertaintyHigh?: number;    // 不确定性高阈值（默认 0.7）
-  maxCollectRetry?: number;   // 最大收集重试次数（默认 3）
   maxNoProgress?: number;      // 最大无进展次数（默认 3）
   maxIterations?: number;      // 最大迭代次数（默认 50）
 }
@@ -223,9 +222,6 @@ export function parseThresholdsConfig(agentMdContent?: string): AgentThresholdsC
       }
       if (typeof parsed.thresholds.uncertaintyHigh === 'number') {
         thresholds.uncertaintyHigh = parsed.thresholds.uncertaintyHigh;
-      }
-      if (typeof parsed.thresholds.maxCollectRetry === 'number') {
-        thresholds.maxCollectRetry = parsed.thresholds.maxCollectRetry;
       }
       if (typeof parsed.thresholds.maxNoProgress === 'number') {
         thresholds.maxNoProgress = parsed.thresholds.maxNoProgress;

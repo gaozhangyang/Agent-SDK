@@ -21,7 +21,6 @@ export type RunRequestBody = {
         uncertaintyHigh?: number;
         maxIterations?: number;
         maxNoProgress?: number;
-        maxCollectRetry?: number;
     };
     debug?: boolean;
     resume?: boolean;
