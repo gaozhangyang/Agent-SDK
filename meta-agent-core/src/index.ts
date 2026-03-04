@@ -81,29 +81,65 @@ export function parseStrategiesConfig(agentMdContent?: string): AgentStrategiesC
   }
   
   // 优先尝试解析 ```json 代码块
-  const jsonBlockMatch = agentMdContent.match(/```json\s*([\s\S]*?)\s*```/);
-  if (jsonBlockMatch) {
-    try {
-      const parsed = JSON.parse(jsonBlockMatch[1]);
-      // 合并配置
-      const config: AgentStrategiesConfig = { ...defaultConfig };
-      
-      if (parsed.level) config.level = parsed.level;
-      if (typeof parsed.permissions === 'number' && parsed.permissions >= 0 && parsed.permissions <= 4) {
-        config.permissions = parsed.permissions;
+  // 注意：AGENT.md 中可能有多个 ```json 代码块，我们需要找到包含 strategies 字段的那个
+  const jsonBlockMatches = [...agentMdContent.matchAll(/```json\s*([\s\S]*?)\s*```/g)];
+  if (jsonBlockMatches.length > 0) {
+    // 优先查找包含 strategies 字段的代码块
+    for (const match of jsonBlockMatches.reverse()) {
+      try {
+        const parsed = JSON.parse(match[1]);
+        // 检查是否包含 strategies 字段或 permissions 字段
+        if (parsed.strategies || parsed.permissions !== undefined) {
+          // 合并配置
+          const config: AgentStrategiesConfig = { ...defaultConfig };
+          
+          // 支持两种格式：
+          // 1. 整个代码块只包含 strategies 配置（向后兼容）
+          // 2. 完整的配置对象，需要从中提取 strategies 字段
+          const strategiesData = parsed.strategies || parsed;
+          
+          if (strategiesData.level) config.level = strategiesData.level;
+          if (typeof strategiesData.permissions === 'number' && strategiesData.permissions >= 0 && strategiesData.permissions <= 4) {
+            config.permissions = strategiesData.permissions;
+          }
+          if (strategiesData.mode_fsm) config.mode_fsm = strategiesData.mode_fsm;
+          if (strategiesData.permission_fsm) config.permission_fsm = strategiesData.permission_fsm;
+          if (strategiesData.harness) config.harness = strategiesData.harness;
+          if (strategiesData.error_classifier) config.error_classifier = strategiesData.error_classifier;
+          
+          if (strategiesData.judge) {
+            config.judge = { ...defaultConfig.judge, ...strategiesData.judge };
+          }
+          
+          return config;
+        }
+      } catch (e) {
+        // 跳过解析失败的代码块，继续尝试下一个
       }
-      if (parsed.mode_fsm) config.mode_fsm = parsed.mode_fsm;
-      if (parsed.permission_fsm) config.permission_fsm = parsed.permission_fsm;
-      if (parsed.harness) config.harness = parsed.harness;
-      if (parsed.error_classifier) config.error_classifier = parsed.error_classifier;
+    }
+    // 如果没有找到包含 strategies 的代码块，尝试解析最后一个代码块（通常是运行时配置）
+    const lastMatch = jsonBlockMatches[jsonBlockMatches.length - 1];
+    try {
+      const parsed = JSON.parse(lastMatch[1]);
+      const config: AgentStrategiesConfig = { ...defaultConfig };
+      const strategiesData = parsed.strategies || parsed;
       
-      if (parsed.judge) {
-        config.judge = { ...defaultConfig.judge, ...parsed.judge };
+      if (strategiesData.level) config.level = strategiesData.level;
+      if (typeof strategiesData.permissions === 'number' && strategiesData.permissions >= 0 && strategiesData.permissions <= 4) {
+        config.permissions = strategiesData.permissions;
+      }
+      if (strategiesData.mode_fsm) config.mode_fsm = strategiesData.mode_fsm;
+      if (strategiesData.permission_fsm) config.permission_fsm = strategiesData.permission_fsm;
+      if (strategiesData.harness) config.harness = strategiesData.harness;
+      if (strategiesData.error_classifier) config.error_classifier = strategiesData.error_classifier;
+      
+      if (strategiesData.judge) {
+        config.judge = { ...defaultConfig.judge, ...strategiesData.judge };
       }
       
       return config;
     } catch (e) {
-      console.warn('Failed to parse JSON config block, falling back to YAML parsing:', e);
+      // 忽略错误，回退到 YAML 解析
     }
   }
   

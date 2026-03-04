@@ -40,13 +40,19 @@ async function executeToolCalls(proposal: string, primitives: Primitives): Promi
         const command = commandMatch ? commandMatch[1] : toolArgs.trim();
         result = await primitives.bash(command);
       } else if (toolName === 'Read') {
-        // 解析 path 参数
-        const pathMatch = toolArgs.match(/<parameter name="path">([\s\S]*?)<\/parameter>/);
+        // 解析 path 参数（兼容 file_path 和 path 两种参数名）
+        let pathMatch = toolArgs.match(/<parameter name="path">([\s\S]*?)<\/parameter>/);
+        if (!pathMatch) {
+          pathMatch = toolArgs.match(/<parameter name="file_path">([\s\S]*?)<\/parameter>/);
+        }
         const path = pathMatch ? pathMatch[1] : toolArgs.trim();
         result = await primitives.read(path);
       } else if (toolName === 'Write') {
-        // 解析 path 和 content 参数
-        const pathMatch = toolArgs.match(/<parameter name="path">([\s\S]*?)<\/parameter>/);
+        // 解析 path 和 content 参数（兼容 file_path 和 path 两种参数名）
+        let pathMatch = toolArgs.match(/<parameter name="path">([\s\S]*?)<\/parameter>/);
+        if (!pathMatch) {
+          pathMatch = toolArgs.match(/<parameter name="file_path">([\s\S]*?)<\/parameter>/);
+        }
         const contentMatch = toolArgs.match(/<parameter name="content">([\s\S]*?)<\/parameter>/);
         if (pathMatch && contentMatch) {
           await primitives.write(pathMatch[1], contentMatch[1]);
@@ -55,8 +61,11 @@ async function executeToolCalls(proposal: string, primitives: Primitives): Promi
           result = `[Write] Failed: missing path or content parameter`;
         }
       } else if (toolName === 'Edit') {
-        // 解析 path, old, next 参数
-        const pathMatch = toolArgs.match(/<parameter name="path">([\s\S]*?)<\/parameter>/);
+        // 解析 path, old, next 参数（兼容 file_path 和 path 两种参数名）
+        let pathMatch = toolArgs.match(/<parameter name="path">([\s\S]*?)<\/parameter>/);
+        if (!pathMatch) {
+          pathMatch = toolArgs.match(/<parameter name="file_path">([\s\S]*?)<\/parameter>/);
+        }
         const oldMatch = toolArgs.match(/<parameter name="old">([\s\S]*?)<\/parameter>/);
         const nextMatch = toolArgs.match(/<parameter name="next">([\s\S]*?)<\/parameter>/);
         if (pathMatch && oldMatch && nextMatch) {

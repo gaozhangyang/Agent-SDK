@@ -134,6 +134,14 @@ export declare class TerminalLog {
      */
     private formatTimestamp;
     /**
+     * 截断窗口大小配置（默认值，可以在 AGENT.md 中配置覆盖）
+     */
+    private truncateWindowSize;
+    /**
+     * 设置截断窗口大小（从 AGENT.md 配置中读取）
+     */
+    setTruncateWindowSize(size: number): void;
+    /**
      * 将 TerminalEntry 转换为人类友好的 Markdown 格式
      *
      * 修改：根据 change.md 要求

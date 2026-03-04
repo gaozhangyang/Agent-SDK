@@ -233,6 +233,16 @@ class TerminalLog {
         return date.toTimeString().slice(0, 8);
     }
     /**
+     * 截断窗口大小配置（默认值，可以在 AGENT.md 中配置覆盖）
+     */
+    truncateWindowSize = 200;
+    /**
+     * 设置截断窗口大小（从 AGENT.md 配置中读取）
+     */
+    setTruncateWindowSize(size) {
+        this.truncateWindowSize = size;
+    }
+    /**
      * 将 TerminalEntry 转换为人类友好的 Markdown 格式
      *
      * 修改：根据 change.md 要求
@@ -264,7 +274,6 @@ class TerminalLog {
             'bash': '💻 bash',
         };
         const icon = iconMap[entry.operation] || entry.operation;
-        const shortPath = entry.input ? this.shortenPath(entry.input) : '';
         // 耗时标注
         const durationStr = entry.durationMs !== undefined && entry.durationMs > 0
             ? ` · ${entry.durationMs}ms`
@@ -278,12 +287,14 @@ class TerminalLog {
          * - 移除换行符
          * - 截断超长内容
          * - 转义管道符 | 以免破坏表格
+         * 使用配置的截断窗口大小
          */
-        const toSingleLine = (text, maxLen = 100) => {
+        const toSingleLine = (text, maxLen) => {
+            const effectiveMaxLen = maxLen !== undefined ? maxLen : this.truncateWindowSize;
             // 替换换行符为空格，转义管道符
             const singleLine = text.replace(/[\n\r]/g, ' ').replace(/\|/g, '\\|');
-            if (singleLine.length > maxLen) {
-                return singleLine.slice(0, maxLen) + '...';
+            if (singleLine.length > effectiveMaxLen) {
+                return singleLine.slice(0, effectiveMaxLen) + '...';
             }
             return singleLine;
         };
@@ -321,8 +332,9 @@ class TerminalLog {
         let hasFullContent = false;
         switch (entry.operation) {
             case 'llmcall':
-                // LLM 调用 - 只显示输入来源，不显示完整内容
-                const inputPreview = toSingleLine(entry.input || '', 100);
+                // LLM 调用 - 只显示输入预览和 [LLM response]
+                // 根据 change.md: 输入预览和输出预览采用截断展示的方法，截断窗口大小在 AGENT.md 里面配置
+                const inputPreview = toSingleLine(entry.input || '');
                 // 根据 change.md: 只记录输入输出的来源
                 // 如果有 trace_ref，显示关联的 trace seq
                 const traceRef = entry.trace_ref ? ` [trace#${entry.trace_ref}]` : '';
@@ -335,38 +347,86 @@ class TerminalLog {
                 hasFullContent = false;
                 break;
             case 'collect':
-                // Collect 操作 - 只显示查询来源，不显示完整结果
-                const collectQuery = toSingleLine(shortPath || entry.input || '', 100);
-                // 只显示来源数量和简要信息
+                // Collect 操作 - 只显示查询来源和收集到的来源数量
+                // 根据 change.md: 来源的引用(文件路径、由Seq变量记录的trace里面的行数)需要完整展示不截断，如果有多个来源，每个来源单独一行展示
+                // 解析 collect 操作中的 sources 信息
+                const collectInput = entry.input || '';
+                let sourcesInfo = '';
+                try {
+                    // 尝试解析 JSON 格式的 sources
+                    const sources = JSON.parse(collectInput);
+                    if (Array.isArray(sources)) {
+                        // 每个来源单独一行展示，不截断
+                        const sourceLines = sources.map((s) => {
+                            if (s.type === 'file' || s.type === 'skills') {
+                                return `| source  | ${s.query} |`;
+                            }
+                            else if (s.type === 'trace_tag') {
+                                return `| source  | [trace_tag] ${s.query} |`;
+                            }
+                            return `| source  | ${JSON.stringify(s)} |`;
+                        });
+                        sourcesInfo = `\n| --- | --- |\n${sourceLines.join('\n')}`;
+                    }
+                }
+                catch {
+                    // 如果解析失败，直接显示原始输入
+                    sourcesInfo = `\n| --- | --- |\n| source  | ${collectInput} |`;
+                }
+                // 计算来源数量
                 const sourceCount = entry.input ? (entry.input.match(/"type"/g) || []).length : 0;
-                content = `| query  | ${collectQuery} |\n| --- | --- |\n| sources | ${sourceCount} sources collected${truncatedRef} |`;
+                content = `| query   | ${toSingleLine(collectInput, 100)} |\n| --- | --- |\n| collected | ${sourceCount} sources${sourcesInfo}${truncatedRef} |`;
                 hasFullContent = false;
                 break;
             case 'read':
-                // 文件读取 - 只显示文件路径，不显示内容
-                const readPath = toSingleLine(shortPath, 100);
-                // 根据 change.md: 只记录输入输出的来源
-                content = `| path   | ${readPath} |\n| --- | --- |\n| content | [read ${entry.output.length} bytes]${truncatedRef} |`;
+                // 文件读取 - 只显示文件路径和 [read X bytes]
+                // 根据 change.md: 文件路径需要完整展示，不要截断，如果有多个文件，每个文件路径单独一行展示
+                // entry.input 是文件路径
+                const readPath = entry.input || '';
+                // 多个文件路径用换行分隔（如果有的话）
+                const readPaths = readPath.split(',').map(p => p.trim());
+                if (readPaths.length > 1) {
+                    // 多个文件，每个文件单独一行
+                    const pathLines = readPaths.map(p => `| path    | ${p} |`).join('\n');
+                    content = `${pathLines}\n| --- | --- |\n| content | [read ${entry.output.length} bytes]${truncatedRef} |`;
+                }
+                else {
+                    // 单个文件，完整路径不截断
+                    content = `| path    | ${readPath} |\n| --- | --- |\n| content | [read ${entry.output.length} bytes]${truncatedRef} |`;
+                }
                 hasFullContent = false;
                 break;
             case 'write':
-                // 文件写入 - 只显示文件路径
-                const writePath = toSingleLine(shortPath, 100);
-                content = `| path   | ${writePath} |\n| --- | --- |\n| result | [written] |`;
+                // 文件写入 - 只显示文件路径和 [written]
+                // 根据 change.md: 文件路径需要完整展示，不要截断，如果有多个文件，每个文件路径单独一行展示
+                const writePath = entry.input || '';
+                // 多个文件路径用换行分隔（如果有的话）
+                const writePaths = writePath.split(',').map(p => p.trim());
+                if (writePaths.length > 1) {
+                    // 多个文件，每个文件单独一行
+                    const pathLines = writePaths.map(p => `| path    | ${p} |`).join('\n');
+                    content = `${pathLines}\n| --- | --- |\n| result | [written]${truncatedRef} |`;
+                }
+                else {
+                    // 单个文件，完整路径不截断
+                    content = `| path    | ${writePath} |\n| --- | --- |\n| result | [written]${truncatedRef} |`;
+                }
                 hasFullContent = false;
                 break;
             case 'edit':
                 // 文件编辑 - 只显示文件路径
-                const editPath = toSingleLine(shortPath, 100);
-                content = `| path   | ${editPath} |\n| --- | --- |\n| result | [edited] |`;
+                const editPath = entry.input || '';
+                content = `| path    | ${editPath} |\n| --- | --- |\n| result | [edited]${truncatedRef} |`;
                 hasFullContent = false;
                 break;
             case 'bash':
-                // Bash 命令 - 只显示命令，不显示输出内容
+                // Bash 命令 - 只显示命令和 [executed] 状态
+                // 根据 change.md: 不用调用LLM和裁剪,直接把bash终端的输出原封不动复制到这里展示
                 const exitInfo = entry.exitCode !== undefined ? ` (exit=${entry.exitCode})` : '';
-                const bashCmd = toSingleLine(entry.command || '', 100);
-                // 根据 change.md: 只记录命令来源，不显示完整输出
-                content = `| cmd    | ${bashCmd} |\n| --- | --- |\n| output | [executed]${exitInfo}${truncatedRef} |`;
+                const bashCmd = entry.command || '';
+                // 直接展示 bash 输出，不裁剪
+                const bashOutput = entry.output || '';
+                content = `| cmd     | ${bashCmd} |\n| --- | --- |\n| output  | [executed]${exitInfo} |\n| --- | --- |\n| result  | ${toSingleLine(bashOutput, 500)} |`;
                 hasFullContent = false;
                 break;
         }
