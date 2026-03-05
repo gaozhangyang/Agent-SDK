@@ -233,6 +233,7 @@ def make_primitives(node_dir: str, permissions: dict, logger) -> dict:
                 ],
                 temperature=0.7,
                 max_tokens=4096,
+                stop=["```", "<tool_call>", "I'll ", "Let me "],
             )
 
             output = response.choices[0].message.content

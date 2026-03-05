@@ -9,6 +9,7 @@ import subprocess
 from typing import Dict, Any, List, Optional
 from logger import get_logger
 from primitives import make_primitives
+from prompts import get_file_probe_prompt
 
 
 def probe(goal_dir: str, goal: str, permissions: dict, logger) -> str:
@@ -120,30 +121,11 @@ def ask_llm_for_files(
     primitives = make_primitives(node_dir, permissions, logger)
     llm_call = primitives["llm_call"]
 
-    prompt = """Analyze this task and determine which files need to be read to understand the task.
-
-Directory structure:
-{tree}
-
-File sizes:
-{sizes}
-
-Memory:
-{memory}
-
-Task goal:
-{goal}
-
-Return a JSON object with this format:
-{{
-    "files_by_priority": [
-        {{"path": "file1.md", "priority": "high", "reason": "contains task description"}},
-        {{"path": "file2.py", "priority": "medium", "reason": "contains implementation"}}
-    ]
-}}
-
-Only include files that are relevant to solving this task. Priority levels: high, medium, low.
-"""
+    # 加载外部 prompt 模板
+    file_probe_template = get_file_probe_prompt()
+    prompt = file_probe_template.format(
+        tree=tree, sizes=sizes, memory=memory, goal=goal
+    )
 
     try:
         result = llm_call(context=[tree, sizes, memory, goal], prompt=prompt)

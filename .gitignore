@@ -8,6 +8,7 @@ agent_chat_config.json
 *.pyc
 node_modules
 data
+goals/
 **/state.json
 **/trace.jsonl
 **/terminal.md

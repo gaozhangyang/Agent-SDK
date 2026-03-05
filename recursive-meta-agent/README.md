@@ -422,6 +422,34 @@ meta-agent 的完整核心，不可再拆分。能跑、能递归、能自愈、
 7. **全局记录**: trace.jsonl, terminal.md, state.jsonl
 8. **权限控制**: permissions.json 加载与权限校验
 
+### 自定义 Prompt
+
+所有 LLM 调用的 prompt 都已抽离到 `prompts/` 目录下的 `.md` 文件中。用户可以通过修改这些文件来自定义模型行为，无需修改代码。
+
+#### prompts 目录结构
+
+```
+prompts/
+├── system_prompt.md     # 系统级 prompt，基础角色定义
+├── code_generator.md    # 代码生成 prompt（直接执行模式）
+├── aggregator.md        # 结果聚合 prompt（分解执行模式）
+├── decision.md         # 决策 prompt（直接解决还是分解）
+├── decomposer.md       # 任务分解 prompt
+└── file_probe.md       # 文件探测 prompt（Probe 阶段）
+```
+
+#### 如何自定义
+
+1. **修改系统 prompt**: 编辑 `prompts/system_prompt.md` 可以改变模型的基础角色定义
+2. **修改特定行为**: 
+   - 修改 `prompts/decision.md` 可以改变任务分解策略
+   - 修改 `prompts/decomposer.md` 可以改变子任务生成方式
+   - 修改 `prompts/code_generator.md` 可以改变代码生成风格
+   - 修改 `prompts/aggregator.md` 可以改变结果聚合逻辑
+   - 修改 `prompts/file_probe.md` 可以改变文件选择策略
+
+prompt 模板使用 Python 格式化字符串语法，变量用 `{}` 包裹。例如 `{goal}`、`{context}` 等。
+
 ### 入口使用
 
 ```bash

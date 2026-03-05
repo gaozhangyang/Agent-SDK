@@ -13,6 +13,7 @@ from datetime import datetime
 from logger import get_logger
 from primitives import make_primitives
 from deps import validate_dependencies, get_execution_levels, ValidationError
+from prompts import get_system_prompt, get_code_generator_prompt, get_aggregator_prompt
 
 
 def sanitize_subtask_name(name: str) -> str:
@@ -74,34 +75,23 @@ def execute_direct(
     primitives = make_primitives(goal_dir, permissions, logger)
     llm_call = primitives["llm_call"]
 
-    prompt = f"""Generate a Python script to solve this task.
+    # 加载外部 prompt 模板
+    system_prompt = get_system_prompt()
+    code_gen_template = get_code_generator_prompt()
 
-Goal:
-{goal}
-
-Context:
-{context}
-{
-        f'''
+    # 格式化 prompt
+    error_hint_block = (
+        f"""
 Error from previous attempt:
 {error_hint}
-'''
+"""
         if error_hint
         else ""
-    }
+    )
 
-You can use these primitives:
-- read(path): Read file content
-- write(path, content): Write file content
-- bash(command): Execute shell command
-- llm_call(context, prompt): Call LLM API
-
-Write the results to {goal_dir}/results.md in JSON format:
-{{"status": "completed", "result": "..."}}
-
-If you cannot complete the task, write:
-{{"status": "escalated", "reason": "...", "error_ref": "error.md"}}
-"""
+    prompt = system_prompt + code_gen_template.format(
+        goal=goal, context=context, error_hint=error_hint_block, goal_dir=goal_dir
+    )
 
     try:
         script_content = llm_call(context=[goal, context, error_hint], prompt=prompt)
@@ -332,26 +322,15 @@ def aggregate_results(
             subtask_info.append({"name": subtask["name"], "results_path": results_path})
 
     # 1. 生成 script.py，让 LLM 生成聚合逻辑代码
-    prompt = f"""Generate a Python script to aggregate results from subtasks and answer the original goal.
+    # 加载外部 prompt 模板
+    system_prompt = get_system_prompt()
+    aggregator_template = get_aggregator_prompt()
 
-Original goal:
-{goal}
+    subtasks_info = json.dumps(subtask_info, indent=2, ensure_ascii=False)
 
-Subtasks to aggregate:
-{json.dumps(subtask_info, indent=2, ensure_ascii=False)}
-
-The script should:
-1. Read each subtask's results.md file
-2. Call llm_call() to synthesize all results into a final answer
-3. Write the final result to {goal_dir}/results.md in JSON format:
-   {{"status": "completed", "result": "..."}}
-
-You can use these primitives:
-- read(path): Read file content
-- write(path, content): Write file content
-- bash(command): Execute shell command
-- llm_call(context, prompt): Call LLM API
-"""
+    prompt = system_prompt + aggregator_template.format(
+        goal=goal, subtasks_info=subtasks_info, goal_dir=goal_dir
+    )
 
     try:
         script_content = llm_call(context=[goal], prompt=prompt)

@@ -14,6 +14,7 @@ from probe import probe
 from executor import execute_direct, execute_decompose, write_results_escalated
 from deps import validate_dependencies, ValidationError
 from recovery import recover
+from prompts import get_decision_prompt, get_decomposer_prompt
 
 # 环境变量配置
 MAX_DEPTH = int(os.environ.get("MAX_DEPTH", "4"))
@@ -175,23 +176,9 @@ def make_decision(
     primitives = make_primitives(node_dir, permissions, logger)
     llm_call = primitives["llm_call"]
 
-    prompt = f"""Analyze this task and decide whether to solve it directly or decompose it into subtasks.
-
-Goal:
-{goal}
-
-Context:
-{context}
-
-Return a JSON object:
-{{"type": "direct"}} - if the task is simple enough to solve directly
-{{"type": "decompose", "subtasks": [{{"name": "subtask1", "description": "..."}}]}} - if the task needs to be broken down
-
-Consider:
-- Is the task complex enough to benefit from decomposition?
-- Can the task be easily broken into independent subtasks?
-- What is the max depth allowed? (from permissions)
-"""
+    # 加载外部 prompt 模板
+    decision_template = get_decision_prompt()
+    prompt = decision_template.format(goal=goal, context=context)
 
     try:
         result = llm_call(context=context, prompt=prompt)
@@ -254,34 +241,9 @@ def get_subtasks(
     primitives = make_primitives(node_dir, permissions, logger)
     llm_call = primitives["llm_call"]
 
-    prompt = f"""Break down this task into subtasks.
-
-Goal:
-{goal}
-
-Context:
-{context}
-
-Return a JSON array of subtasks:
-[
-    {{"name": "subtask1", "description": "description of subtask 1", "depends_on": []}},
-    {{"name": "subtask2", "description": "description of subtask 2", "depends_on": ["subtask1"]}}
-]
-
-IMPORTANT: Each subtask name MUST:
-- Only contain letters, numbers, underscores, and hyphens (a-z, A-Z, 0-9, _, -)
-- NOT contain spaces, slashes, colons, or any special characters
-- Be unique within the list
-- Example good names: "fetch_papers", "screen-results", "write_summary"
-- Example bad names: "fetch papers", "screen/results", "write:summary"
-
-Example:
-[
-    {{"name": "fetch_papers", "description": "Fetch papers from arXiv", "depends_on": []}},
-    {{"name": "screen_papers", "description": "Screen papers for relevance", "depends_on": ["fetch_papers"]}},
-    {{"name": "write_summary", "description": "Write summary", "depends_on": ["screen_papers"]}}
-]
-"""
+    # 加载外部 prompt 模板
+    decomp_template = get_decomposer_prompt()
+    prompt = decomp_template.format(goal=goal, context=context, dependency_error="")
 
     max_retries = 3
 
@@ -328,8 +290,11 @@ Example:
                         error=str(e),
                     )
 
-                    # 将错误信息注入 prompt 重新生成
-                    prompt += f"\n\nPrevious dependency validation failed: {str(e)}\nPlease fix the dependencies."
+                    # 重新加载 prompt 模板并注入错误信息
+                    dependency_error = f"\n\nPrevious dependency validation failed: {str(e)}\nPlease fix the dependencies."
+                    prompt = decomp_template.format(
+                        goal=goal, context=context, dependency_error=dependency_error
+                    )
                     continue
 
         except Exception as e:
