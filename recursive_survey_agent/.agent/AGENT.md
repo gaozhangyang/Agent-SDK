@@ -184,7 +184,7 @@ output = bash("""python skills/screening/screen_papers.py \
 {
   "llm": {
     "baseUrl": "http://35.220.164.252:3888/v1/",
-    "model": "MiniMax-M2.5",
+    "model": "MiniMax-M2.5-highspeed",
     "apiKey": "${LLM_API_KEY}"
   },
   "fetch_max_papers": 10,

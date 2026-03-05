@@ -13,7 +13,7 @@ from datetime import datetime
 from logger import get_logger
 from primitives import make_primitives
 from deps import validate_dependencies, get_execution_levels, ValidationError
-from prompts import get_system_prompt, get_code_generator_prompt, get_aggregator_prompt
+from prompts import get_code_generator_prompt, get_aggregator_prompt
 
 
 def sanitize_subtask_name(name: str) -> str:
@@ -75,11 +75,8 @@ def execute_direct(
     primitives = make_primitives(goal_dir, permissions, logger)
     llm_call = primitives["llm_call"]
 
-    # 加载外部 prompt 模板
-    system_prompt = get_system_prompt()
+    # 加载代码生成 prompt（已合并 system + 任务说明，含输出格式与 skills/tools 鼓励）
     code_gen_template = get_code_generator_prompt()
-
-    # 格式化 prompt
     error_hint_block = (
         f"""
 Error from previous attempt:
@@ -88,8 +85,7 @@ Error from previous attempt:
         if error_hint
         else ""
     )
-
-    prompt = system_prompt + code_gen_template.format(
+    prompt = code_gen_template.format(
         goal=goal, context=context, error_hint=error_hint_block, goal_dir=goal_dir
     )
 
@@ -122,21 +118,26 @@ Error from previous attempt:
 
 
 def parse_script(llm_output: str) -> str:
-    """从 LLM 输出中解析出 Python 脚本"""
+    """从 LLM 输出中解析出 Python 脚本。若含 <tool_code> 等标记则先剥离再提取。"""
     import re
+
+    # 若模型误输出了 tool 标记，先去掉整段 <tool_code>...</tool_code>，避免写入 script.py
+    cleaned = re.sub(r"<tool_code>.*?</tool_code>", "", llm_output, flags=re.DOTALL)
+    cleaned = re.sub(r"<tool\s+name=[^>]*>.*?</tool>", "", cleaned, flags=re.DOTALL)
+    if cleaned.strip() != llm_output.strip():
+        llm_output = cleaned
 
     # 检查是否包含 ```python 或 ``` 标记
     code_block_match = re.search(r"```python\n(.*?)```", llm_output, re.DOTALL)
     if code_block_match:
-        return code_block_match.group(1)
+        return code_block_match.group(1).strip()
 
-    # 检查是否有其他代码块
     code_block_match = re.search(r"```\n(.*?)```", llm_output, re.DOTALL)
     if code_block_match:
-        return code_block_match.group(1)
+        return code_block_match.group(1).strip()
 
-    # 没有代码块，返回整个输出
-    return llm_output
+    # 没有代码块，返回整个输出（去除首尾空白）
+    return llm_output.strip()
 
 
 def execute_script(goal_dir: str, permissions: dict, logger) -> None:
@@ -322,13 +323,9 @@ def aggregate_results(
             subtask_info.append({"name": subtask["name"], "results_path": results_path})
 
     # 1. 生成 script.py，让 LLM 生成聚合逻辑代码
-    # 加载外部 prompt 模板
-    system_prompt = get_system_prompt()
     aggregator_template = get_aggregator_prompt()
-
     subtasks_info = json.dumps(subtask_info, indent=2, ensure_ascii=False)
-
-    prompt = system_prompt + aggregator_template.format(
+    prompt = aggregator_template.format(
         goal=goal, subtasks_info=subtasks_info, goal_dir=goal_dir
     )
 
