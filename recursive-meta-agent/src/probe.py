@@ -16,10 +16,11 @@ def probe(goal_dir: str, goal: str, permissions: dict, logger) -> str:
     """
     以最小代价理解任务形状。
     1. bash 获取目录结构和文件大小（不读文件内容）
-    2. 读取 memory.jsonl 最近 5 条作为历史参考
-    3. llm_call 决定需要读哪些文件（返回 JSON: {files_by_priority: []}）
-    4. 按优先级拉取文件内容，预算耗尽则停止，标记 context_truncated
-    5. 写入 context.md
+    2. 获取 permissions 允许的目录（如 skills）的结构
+    3. 读取 memory.jsonl 最近 5 条作为历史参考
+    4. llm_call 决定需要读哪些文件（返回 JSON: {files_by_priority: []}）
+    5. 按优先级拉取文件内容，预算耗尽则停止，标记 context_truncated
+    6. 写入 context.md
     返回：context 字符串
     """
 
@@ -27,18 +28,28 @@ def probe(goal_dir: str, goal: str, permissions: dict, logger) -> str:
     tree_output = get_directory_tree(goal_dir)
     sizes_output = get_file_sizes(goal_dir)
 
-    # 2. 获取历史记忆
+    # 2. 获取 permissions 允许的目录结构（如 skills）
+    allowed_dirs_tree = get_allowed_directories_tree(goal_dir, permissions)
+
+    # 3. 获取历史记忆
     memory_hint = get_memory_hint(logger)
 
-    # 3. LLM 决定需要读哪些文件
+    # 4. LLM 决定需要读哪些文件
     files_to_read = ask_llm_for_files(
-        tree_output, sizes_output, memory_hint, goal, permissions, logger, goal_dir
+        tree_output,
+        sizes_output,
+        allowed_dirs_tree,
+        memory_hint,
+        goal,
+        permissions,
+        logger,
+        goal_dir,
     )
 
-    # 4. 按优先级拉取文件内容
+    # 5. 按优先级拉取文件内容
     context, truncated = pull_files_with_budget(files_to_read, permissions, goal_dir)
 
-    # 5. 写入 context.md
+    # 6. 写入 context.md
     context_path = os.path.join(goal_dir, "context.md")
     with open(context_path, "w", encoding="utf-8") as f:
         f.write(context)
@@ -67,6 +78,50 @@ def get_directory_tree(goal_dir: str) -> str:
         return result.stdout or "No files found"
     except Exception as e:
         return f"Error getting directory tree: {str(e)}"
+
+
+def get_allowed_directories_tree(goal_dir: str, permissions: dict) -> str:
+    """
+    获取 permissions 中允许读取的目录结构（如 skills）
+    """
+    read_paths = permissions.get("read", [])
+
+    if not read_paths:
+        return "No additional read paths configured."
+
+    tree_parts = ["# Allowed directories (from permissions.json):\n"]
+
+    for read_path in read_paths:
+        # 处理相对路径
+        if not os.path.isabs(read_path):
+            # 相对于 goal_dir 的父目录
+            base_dir = os.path.dirname(goal_dir)
+            full_path = os.path.normpath(os.path.join(base_dir, read_path))
+        else:
+            full_path = read_path
+
+        # 只探索固定的目录，不向上无限探索
+        if full_path and os.path.isdir(full_path):
+            try:
+                # 只获取目录结构，不读内容
+                result = subprocess.run(
+                    f"find {full_path} -maxdepth 3 -type f \\( -name '*.md' -o -name '*.py' -o -name '*.json' -o -name 'SKILL.md' \\) 2>/dev/null | head -30",
+                    shell=True,
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
+                )
+                if result.stdout.strip():
+                    tree_parts.append(f"\n## {read_path}\n")
+                    tree_parts.append(result.stdout)
+            except Exception:
+                pass
+
+    return (
+        "".join(tree_parts)
+        if len(tree_parts) > 1
+        else "No additional directories found."
+    )
 
 
 def get_file_sizes(goal_dir: str) -> str:
@@ -107,6 +162,7 @@ def get_memory_hint(logger) -> str:
 def ask_llm_for_files(
     tree: str,
     sizes: str,
+    allowed_dirs_tree: str,
     memory: str,
     goal: str,
     permissions: dict,
@@ -124,11 +180,13 @@ def ask_llm_for_files(
     # 加载外部 prompt 模板
     file_probe_template = get_file_probe_prompt()
     prompt = file_probe_template.format(
-        tree=tree, sizes=sizes, memory=memory, goal=goal
+        tree=tree, sizes=sizes, allowed_dirs=allowed_dirs_tree, memory=memory, goal=goal
     )
 
     try:
-        result = llm_call(context=[tree, sizes, memory, goal], prompt=prompt)
+        result = llm_call(
+            context=[tree, sizes, allowed_dirs_tree, memory, goal], prompt=prompt
+        )
 
         # 解析 JSON
         parsed = parse_json_response(result)

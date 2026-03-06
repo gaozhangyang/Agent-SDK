@@ -346,15 +346,37 @@ def execute_with_verification(
             # 3. 执行 script.py
             console_output = execute_script(goal_dir, permissions, logger)
 
-            # 4. 验证结果
+            # 4. 解析执行结果，检查是否需要探索环境
             results_path = os.path.join(goal_dir, "results.md")
             execution_result = ""
             if os.path.exists(results_path):
                 with open(results_path, "r", encoding="utf-8") as f:
                     execution_result = f.read()
+
+                # 检查是否是 needs_exploration 状态
+                parsed_result = parse_results_content(execution_result)
+                if parsed_result.get("status") == "needs_exploration":
+                    # 探索环境后获得新信息，合并到 context 并重试
+                    exploration_info = parsed_result.get("result", "")
+                    logger.log_trace(
+                        kind="needs_exploration",
+                        node=goal_dir,
+                        attempt=attempt + 1,
+                        info=exploration_info[:200],
+                    )
+
+                    # 把探索结果追加到 current_context
+                    exploration_block = (
+                        f"\n\n# Exploration results:\n{exploration_info}\n"
+                    )
+                    current_context = current_context + exploration_block
+
+                    # 继续下一次循环
+                    continue
             else:
                 execution_result = console_output
 
+            # 5. 验证结果（正常流程）
             # 调用 verifier
             verifier_template = get_verifier_prompt()
             verifier_prompt = verifier_template.format(

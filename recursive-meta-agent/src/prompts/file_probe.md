@@ -6,6 +6,9 @@ Directory structure:
 File sizes:
 {sizes}
 
+Allowed external directories (from permissions):
+{allowed_dirs}
+
 Memory:
 {memory}
 
@@ -21,3 +24,4 @@ Return a JSON object with this format:
 }}
 
 Only include files that are relevant to solving this task. Priority levels: high, medium, low.
+IMPORTANT: Pay special attention to the "Allowed external directories" section - these contain reusable skills/tools that you can use in your script.
