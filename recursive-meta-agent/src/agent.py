@@ -11,7 +11,13 @@ from typing import Dict, Any, Optional
 from logger import get_logger, reset_logger
 from permissions import load_permissions
 from probe import probe
-from executor import execute_direct, execute_decompose, write_results_escalated
+from executor import (
+    execute_direct,
+    execute_decompose,
+    execute_with_verification,
+    merge_results,
+    write_results_escalated,
+)
 from deps import validate_dependencies, ValidationError
 from recovery import recover
 from prompts import get_decision_prompt, get_decomposer_prompt
@@ -49,7 +55,9 @@ def meta_agent(
 
     # 显示用标签：有编号时为 "1. goal_name"，否则为 goal_name
     goal_name = os.path.basename(goal_dir.rstrip(os.sep))
-    display_label = f"{display_index}. {goal_name}" if display_index is not None else goal_name
+    display_label = (
+        f"{display_index}. {goal_name}" if display_index is not None else goal_name
+    )
 
     # 1. 读取 goal.md 和 meta.json
     goal = read_goal(goal_dir)
@@ -102,15 +110,20 @@ def meta_agent(
     # 5a/5b 执行
     try:
         if decision_type == "direct":
-            execute_direct(goal_dir, goal, context, permissions, logger, depth)
+            # 使用带验证的执行模式
+            execute_with_verification(
+                goal_dir, goal, context, permissions, logger, depth
+            )
         else:
             # decompose 需要先获取子任务列表
             subtasks = get_subtasks(context, goal, permissions, logger, goal_dir)
 
             if not subtasks:
-                # 无法分解，回退到直接执行
+                # 无法分解，回退到带验证的直接执行
                 logger.log_trace(kind="decompose_fallback", node=goal_dir)
-                execute_direct(goal_dir, goal, context, permissions, logger, depth)
+                execute_with_verification(
+                    goal_dir, goal, context, permissions, logger, depth
+                )
             else:
                 execute_decompose(goal_dir, goal, subtasks, depth, permissions, logger)
 

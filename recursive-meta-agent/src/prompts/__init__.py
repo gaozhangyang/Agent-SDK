@@ -60,3 +60,13 @@ def get_decomposer_prompt() -> str:
 def get_file_probe_prompt() -> str:
     """获取文件探测 prompt 模板"""
     return load_prompt("file_probe")
+
+
+def get_verifier_prompt() -> str:
+    """获取验证器 prompt 模板"""
+    return load_prompt("verifier")
+
+
+def get_revise_prompt() -> str:
+    """获取修订 prompt 模板"""
+    return load_prompt("revise")

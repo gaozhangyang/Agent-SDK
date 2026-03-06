@@ -14,7 +14,12 @@ from datetime import datetime
 from logger import get_logger
 from primitives import make_primitives
 from deps import validate_dependencies, get_execution_levels, ValidationError
-from prompts import get_code_generator_prompt, get_aggregator_prompt
+from prompts import (
+    get_code_generator_prompt,
+    get_aggregator_prompt,
+    get_verifier_prompt,
+    get_revise_prompt,
+)
 
 
 def sanitize_subtask_name(name: str) -> str:
@@ -149,6 +154,355 @@ def parse_script(llm_output: str) -> str:
     return llm_output.strip()
 
 
+def parse_script_plan(llm_output: str) -> tuple:
+    """
+    从 LLM 输出中同时解析出 script 和 plan。
+    期望输出格式包含 ```script 和 ```plan 部分。
+    返回: (script, plan) 元组
+    """
+    import re
+
+    # 清理 tool 标记
+    cleaned = re.sub(r"<tool_code>.*?</tool_code>", "", llm_output, flags=re.DOTALL)
+    cleaned = re.sub(r"<tool\s+name=[^>]*>.*?</tool>", "", cleaned, flags=re.DOTALL)
+    if cleaned.strip() != llm_output.strip():
+        llm_output = cleaned
+
+    script = ""
+    plan = ""
+
+    # 提取 script
+    script_match = re.search(r"```python\n(.*?)```", llm_output, re.DOTALL)
+    if script_match:
+        script = script_match.group(1).strip()
+    else:
+        script_match = re.search(r"```script\n(.*?)```", llm_output, re.DOTALL)
+        if script_match:
+            script = script_match.group(1).strip()
+
+    # 提取 plan
+    plan_match = re.search(r"```plan\n(.*?)```", llm_output, re.DOTALL)
+    if plan_match:
+        plan = plan_match.group(1).strip()
+
+    return script, plan
+
+
+def parse_verifier_response(llm_output: str) -> dict:
+    """
+    解析 verifier LLM 的输出。
+    期望格式: {"pass": true/false, "feedback": "..."}
+    返回: {"pass": bool, "feedback": str}
+    """
+    import re
+
+    # 尝试直接解析 JSON
+    try:
+        result = json.loads(llm_output)
+        if isinstance(result, dict) and "pass" in result:
+            return result
+    except json.JSONDecodeError:
+        pass
+
+    # 尝试提取 JSON
+    json_match = re.search(r"\{[\s\S]*\}", llm_output)
+    if json_match:
+        try:
+            result = json.loads(json_match.group())
+            if isinstance(result, dict) and "pass" in result:
+                return result
+        except json.JSONDecodeError:
+            pass
+
+    # 默认返回失败
+    return {
+        "pass": False,
+        "feedback": f"Failed to parse verifier response: {llm_output[:200]}",
+    }
+
+
+def parse_revise_response(llm_output: str) -> dict:
+    """
+    解析 revise LLM 的输出。
+    期望格式: {"revised_goal": "..."} 或 {"revised_goal": null, "reason": "..."}
+    返回: {"revised_goal": str or None, "reason": str}
+    """
+    import re
+
+    # 尝试直接解析 JSON
+    try:
+        result = json.loads(llm_output)
+        if isinstance(result, dict):
+            return {
+                "revised_goal": result.get("revised_goal"),
+                "reason": result.get("reason", ""),
+            }
+    except json.JSONDecodeError:
+        pass
+
+    # 尝试提取 JSON
+    json_match = re.search(r"\{[\s\S]*\}", llm_output)
+    if json_match:
+        try:
+            result = json.loads(json_match.group())
+            if isinstance(result, dict):
+                return {
+                    "revised_goal": result.get("revised_goal"),
+                    "reason": result.get("reason", ""),
+                }
+        except json.JSONDecodeError:
+            pass
+
+    # 默认返回无需修订
+    return {"revised_goal": None, "reason": "Failed to parse revise response"}
+
+
+# 最大验证循环次数
+MAX_VERIFY_RETRY = int(os.environ.get("MAX_VERIFY_RETRY", "3"))
+
+
+def _build_history_block(history: list) -> str:
+    """
+    构建历史记录块，包含之前每次尝试的 script 和 feedback
+    """
+    if not history:
+        return ""
+
+    block = "\n# === History of previous attempts ===\n"
+    for i, (script, feedback) in enumerate(history, 1):
+        block += f"\n## Attempt {i}\n"
+        block += f"Script:\n```script\n{script}\n```\n"
+        block += f"Verification feedback: {feedback}\n"
+    block += "\n# === End of history ===\n"
+    block += "\nIMPORTANT: Based on the history above, make MINIMAL changes to fix only what's necessary. "
+    block += "Do NOT rewrite the entire script - only fix the parts that caused the verification failure.\n"
+    return block
+
+
+def execute_with_verification(
+    goal_dir: str, goal: str, context: str, permissions: dict, logger, depth: int = 0
+) -> None:
+    """
+    带验证循环的直接执行模式。
+    1. 生成 script 和 plan（通过 LLMCall），参考历史尝试
+    2. 执行 script
+    3. 验证结果（通过 verifier LLMCall）
+    4. 如果验证失败，记录历史并重试（最多 MAX_VERIFY_RETRY 次）
+    """
+    primitives = make_primitives(goal_dir, permissions, logger)
+    llm_call = primitives["llm_call"]
+
+    current_goal = goal
+    current_context = context
+    error_hint = ""
+    history = []  # 记录每次尝试的 (script, feedback)
+
+    for attempt in range(MAX_VERIFY_RETRY):
+        # 1. 构建历史记录块
+        history_block = _build_history_block(history)
+
+        # 2. 构建 prompt，包含历史信息
+        error_hint_block = (
+            f"\nError from previous attempt:\n{error_hint}" if error_hint else ""
+        )
+
+        code_gen_template = get_code_generator_prompt()
+        prompt = code_gen_template.format(
+            goal=current_goal,
+            context=current_context,
+            error_hint=error_hint_block,
+            goal_dir=goal_dir,
+            HISTORY_BLOCK=history_block,
+        )
+
+        try:
+            script_plan_content = llm_call(
+                context=[current_goal, current_context, error_hint, history_block],
+                prompt=prompt,
+            )
+
+            # 解析 script 和 plan
+            script, plan = parse_script_plan(script_plan_content)
+
+            if not script:
+                # 如果没有提取到 script，使用整个输出作为 script
+                script = parse_script(script_plan_content)
+
+            # 写入 script.py
+            script_path = os.path.join(goal_dir, "script.py")
+            with open(script_path, "w", encoding="utf-8") as f:
+                f.write(script)
+
+            # 写入 plan.md（如果存在）
+            if plan:
+                plan_path = os.path.join(goal_dir, "plan.md")
+                with open(plan_path, "w", encoding="utf-8") as f:
+                    f.write(plan)
+
+            logger.log_trace(
+                kind="script_generated", node=goal_dir, attempt=attempt + 1
+            )
+
+            # 3. 执行 script.py
+            console_output = execute_script(goal_dir, permissions, logger)
+
+            # 4. 验证结果
+            results_path = os.path.join(goal_dir, "results.md")
+            execution_result = ""
+            if os.path.exists(results_path):
+                with open(results_path, "r", encoding="utf-8") as f:
+                    execution_result = f.read()
+            else:
+                execution_result = console_output
+
+            # 调用 verifier
+            verifier_template = get_verifier_prompt()
+            verifier_prompt = verifier_template.format(
+                plan=plan or "No plan provided",
+                script=script,
+                result=execution_result,
+            )
+
+            verifier_response = llm_call(
+                context=[current_goal, plan or "", script, execution_result],
+                prompt=verifier_prompt,
+            )
+
+            verification = parse_verifier_response(verifier_response)
+
+            if verification.get("pass", False):
+                # 验证通过，合并控制台输出到 results.md
+                if os.path.exists(results_path):
+                    _merge_console_into_results(results_path, console_output)
+                else:
+                    write_results_completed(
+                        goal_dir,
+                        "Script completed with verification",
+                        console=console_output,
+                    )
+                logger.log_trace(
+                    kind="verification_passed", node=goal_dir, attempt=attempt + 1
+                )
+                return
+
+            # 验证失败，获取反馈
+            feedback = verification.get("feedback", "Verification failed")
+            logger.log_trace(
+                kind="verification_failed",
+                node=goal_dir,
+                attempt=attempt + 1,
+                feedback=feedback,
+            )
+
+            # 5. 记录到历史，然后尝试修订 goal
+            history.append((script, feedback))
+
+            # 6. 修订 goal
+            revise_template = get_revise_prompt()
+            revise_prompt = revise_template.format(goal=current_goal, feedback=feedback)
+
+            revise_response = llm_call(
+                context=[current_goal, feedback], prompt=revise_prompt
+            )
+
+            revise_result = parse_revise_response(revise_response)
+
+            if revise_result.get("revised_goal"):
+                # 更新 goal 并继续循环
+                current_goal = revise_result["revised_goal"]
+                goal_path = os.path.join(goal_dir, "goal.md")
+                with open(goal_path, "w", encoding="utf-8") as f:
+                    f.write(current_goal)
+
+                error_hint = (
+                    f"Verification feedback: {feedback}\n"
+                    f"Revision reason: {revise_result.get('reason', '')}"
+                )
+                logger.log_trace(
+                    kind="goal_revised",
+                    node=goal_dir,
+                    revised_goal=current_goal[:100],
+                    reason=revise_result.get("reason", ""),
+                )
+            else:
+                # goal 无需修订，但验证失败
+                error_hint = f"Verification feedback: {feedback}"
+
+        except Exception as e:
+            # 执行过程中出现异常
+            error_hint = str(e)
+            logger.log_trace(
+                kind="execution_error", node=goal_dir, attempt=attempt + 1, error=str(e)
+            )
+
+    # 达到最大重试次数，标记为失败
+    error_path = os.path.join(goal_dir, "error.md")
+    with open(error_path, "w", encoding="utf-8") as f:
+        f.write(f"Verification failed after {MAX_VERIFY_RETRY} attempts")
+    write_results_escalated(
+        goal_dir,
+        f"Verification failed after {MAX_VERIFY_RETRY} attempts",
+        "error.md",
+    )
+    raise RuntimeError(f"Verification failed after {MAX_VERIFY_RETRY} attempts")
+
+
+def merge_results(
+    goal_dir: str, subtasks: List[Dict[str, Any]], goal: str, logger
+) -> None:
+    """
+    分解模式下直接合并子节点结果，不再调用 LLM。
+    读取所有子节点的 results.md，按顺序合并到一个结果文件中。
+    """
+    merged_results = []
+    all_status = []
+
+    for subtask in subtasks:
+        subdir = os.path.join(goal_dir, subtask["name"])
+        results_path = os.path.join(subdir, "results.md")
+
+        if os.path.exists(results_path):
+            with open(results_path, "r", encoding="utf-8") as f:
+                content = f.read()
+
+            results_data = parse_results_content(content)
+            status = results_data.get("status", "unknown")
+            all_status.append(status)
+
+            merged_results.append(
+                {
+                    "subtask": subtask["name"],
+                    "status": status,
+                    "result": results_data.get("result", ""),
+                    "console": results_data.get("console", ""),
+                }
+            )
+
+    # 写入合并后的结果
+    merged_content = f"status: completed\n\n--- merged results ---\n\n"
+
+    for item in merged_results:
+        merged_content += f"## Subtask: {item['subtask']}\n"
+        merged_content += f"Status: {item['status']}\n\n"
+        if item.get("result"):
+            merged_content += f"--- result ---\n{item['result']}\n\n"
+        if item.get("console"):
+            merged_content += f"--- console ---\n{item['console']}\n\n"
+        merged_content += "\n"
+
+    results_path = os.path.join(goal_dir, "results.md")
+    with open(results_path, "w", encoding="utf-8") as f:
+        f.write(merged_content)
+
+    # 检查是否有失败的任务
+    if "escalated" in all_status or "failed" in all_status:
+        update_meta_status(goal_dir, "failed")
+    else:
+        update_meta_status(goal_dir, "completed")
+
+    logger.log_trace(kind="results_merged", node=goal_dir, subtask_count=len(subtasks))
+
+
 # 子进程执行 script 时的默认超时（秒）
 SCRIPT_RUN_TIMEOUT = int(os.environ.get("SCRIPT_RUN_TIMEOUT", "600"))
 
@@ -195,7 +549,9 @@ def execute_script(goal_dir: str, permissions: dict, logger) -> str:
     console_output = stdout + ("\n" + stderr if stderr else "")
 
     if result.returncode != 0:
-        _write_script_failure(goal_dir, f"Exit code {result.returncode}", console_output)
+        _write_script_failure(
+            goal_dir, f"Exit code {result.returncode}", console_output
+        )
         raise RuntimeError(
             f"Script exited with code {result.returncode}. See error.md and results.md (console)."
         )
@@ -392,16 +748,16 @@ def execute_decompose(
                 # 检查是否是 escalated（兼容新/旧 results 格式）
                 results = parse_results_content(results_content)
                 if results.get("status") == "escalated":
-                        # 写入当前的 escalated results.md
-                        write_results_escalated(
-                            goal_dir,
-                            f"Subtask {task['name']} escalated",
-                            os.path.join(task["name"], "error.md"),
-                        )
-                        return  # 停止执行
+                    # 写入当前的 escalated results.md
+                    write_results_escalated(
+                        goal_dir,
+                        f"Subtask {task['name']} escalated",
+                        os.path.join(task["name"], "error.md"),
+                    )
+                    return  # 停止执行
 
-    # 6. 聚合子节点结果
-    aggregate_results(goal_dir, subtasks, goal, permissions, logger)
+    # 6. 聚合子节点结果 - 使用 merge_results 直接合并，不再调用 LLM
+    merge_results(goal_dir, subtasks, goal, logger)
 
 
 def aggregate_results(

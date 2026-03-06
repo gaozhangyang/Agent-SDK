@@ -1,3 +1,25 @@
-帮我把本项目里面用到的所有prompt单独抽离出来，放到.md文件里面，而不是写死在程序里面。用户通过修改对应的.md可以修改模型行为
+# 算法重构：带验证循环的递归 Agent
 
-完成任务后记得更新README.md(只做必要更新)
+```python
+def solve(goal_dir, goal, context):
+    decision = llm_call(context, "直接解决还是分解？返回 {type: 'direct'|'decompose'}")
+    
+    if decision.type == "direct":
+        # 带验证循环的直接解决
+        history = []  # 记录每次尝试的 (script, feedback)
+        for _ in range(MAX_VERIFY_RETRY):
+            prompt = build_code_gen_prompt(goal, context, history)
+            script, plan = llm_call(prompt, "生成 script（最小修改历史 script）和 plan")
+            result = execute(script)
+            feedback = llm_call(verifier_prompt, [plan, script, result])
+            if feedback.pass:
+                return result
+            history.append((script, feedback))  # 累积历史到 context
+        raise "验证失败"
+    
+    else:
+        # 分解执行
+        subgoals = llm_call(goal, "分解为子任务列表")
+        results = [solve(subgoal) for subgoal in subgoals]
+        return merge(results)  # 直接合并，不用 LLM
+```
