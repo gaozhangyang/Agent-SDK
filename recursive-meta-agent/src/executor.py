@@ -6,6 +6,7 @@ import os
 import re
 import json
 import subprocess
+import sys
 import hashlib
 from typing import Dict, Any, List, Optional
 from datetime import datetime
@@ -102,18 +103,26 @@ Error from previous attempt:
 
         logger.log_trace(kind="script_generated", node=goal_dir)
 
-        # 3. 确定性执行脚本
-        execute_script(goal_dir, permissions, logger)
+        # 3. 确定性执行脚本，并捕获控制台输出
+        console_output = execute_script(goal_dir, permissions, logger)
+
+        # 将控制台输出合并进 results.md
+        results_path = os.path.join(goal_dir, "results.md")
+        if os.path.exists(results_path):
+            _merge_console_into_results(results_path, console_output)
+        else:
+            write_results_completed(
+                goal_dir,
+                "Script completed without writing results.md",
+                console=console_output,
+            )
 
     except Exception as e:
-        # 写入错误信息
+        # 写入错误信息与 escalated 结果，保证节点总有“结果记录”
         error_path = os.path.join(goal_dir, "error.md")
         with open(error_path, "w", encoding="utf-8") as f:
             f.write(str(e))
-
-        # 更新 meta.json
-        update_meta_status(goal_dir, "failed")
-
+        write_results_escalated(goal_dir, str(e), "error.md")
         raise
 
 
@@ -140,41 +149,137 @@ def parse_script(llm_output: str) -> str:
     return llm_output.strip()
 
 
-def execute_script(goal_dir: str, permissions: dict, logger) -> None:
+# 子进程执行 script 时的默认超时（秒）
+SCRIPT_RUN_TIMEOUT = int(os.environ.get("SCRIPT_RUN_TIMEOUT", "600"))
+
+
+def execute_script(goal_dir: str, permissions: dict, logger) -> str:
     """
-    执行 script.py
-    使用 exec() 在同进程执行
+    在子进程中执行 script.py，子进程崩溃不会影响主进程。
+    将子进程的 stdout/stderr 完整捕获并作为控制台结果返回（含报错信息）。
+    返回: 控制台输出字符串（stdout + stderr）
     """
     script_path = os.path.join(goal_dir, "script.py")
-
     if not os.path.exists(script_path):
         raise FileNotFoundError(f"Script not found: {script_path}")
 
-    # 读取 script 内容
-    with open(script_path, "r", encoding="utf-8") as f:
-        script_content = f.read()
+    src_dir = os.path.dirname(os.path.abspath(__file__))
+    runner = os.path.join(src_dir, "script_runner.py")
+    goal_dir_abs = os.path.abspath(goal_dir)
 
-    # 创建执行上下文
-    primitives = make_primitives(goal_dir, permissions, logger)
-
-    # 添加内置函数
-    exec_globals = {"__builtins__": __builtins__, **primitives}
-
-    # 执行脚本
+    # 供子进程读取 permissions
+    perm_path = os.path.join(goal_dir_abs, ".executor_permissions.json")
     try:
-        exec(script_content, exec_globals)
+        with open(perm_path, "w", encoding="utf-8") as f:
+            json.dump(permissions or {}, f, indent=2, ensure_ascii=False)
+    except OSError:
+        pass
 
-        logger.log_trace(kind="script_executed", node=goal_dir)
+    try:
+        result = subprocess.run(
+            [sys.executable, runner, goal_dir_abs],
+            cwd=src_dir,
+            capture_output=True,
+            text=True,
+            timeout=SCRIPT_RUN_TIMEOUT,
+            env=os.environ.copy(),
+        )
+    except subprocess.TimeoutExpired as e:
+        out = (e.stdout or "") + (e.stderr or "")
+        err_msg = f"Script timed out after {SCRIPT_RUN_TIMEOUT}s"
+        _write_script_failure(goal_dir, err_msg, out)
+        raise RuntimeError(err_msg) from e
 
-    except Exception as e:
-        # 捕获所有异常，写入 error.md
-        error_path = os.path.join(goal_dir, "error.md")
-        with open(error_path, "w", encoding="utf-8") as f:
-            f.write(str(e))
+    stdout = result.stdout or ""
+    stderr = result.stderr or ""
+    console_output = stdout + ("\n" + stderr if stderr else "")
 
-        update_meta_status(goal_dir, "failed")
+    if result.returncode != 0:
+        _write_script_failure(goal_dir, f"Exit code {result.returncode}", console_output)
+        raise RuntimeError(
+            f"Script exited with code {result.returncode}. See error.md and results.md (console)."
+        )
 
-        raise
+    logger.log_trace(kind="script_executed", node=goal_dir)
+    return console_output
+
+
+def _write_script_failure(goal_dir: str, message: str, console_output: str) -> None:
+    """子进程失败时写 error.md 与 escalated results.md（含完整控制台输出）"""
+    error_path = os.path.join(goal_dir, "error.md")
+    with open(error_path, "w", encoding="utf-8") as f:
+        f.write(message)
+    write_results_escalated(goal_dir, message, "error.md", console=console_output)
+
+
+def _results_text_format(
+    status: str, result_or_reason: str, console: Optional[str] = None
+) -> str:
+    """生成控制台风格 results.md 正文：首行 status，其余为可读区块"""
+    lines = [f"status: {status}", ""]
+    if result_or_reason:
+        lines.append("--- result ---")
+        lines.append(result_or_reason.strip())
+        lines.append("")
+    if console and console.strip():
+        lines.append("--- console ---")
+        lines.append(console.strip())
+    return "\n".join(lines)
+
+
+def parse_results_content(content: str) -> Dict[str, Any]:
+    """解析 results.md 内容，兼容新（首行 status + 区块）与旧（JSON）格式。供 recovery 等调用。"""
+    content = content.strip()
+    # 旧格式：整份 JSON
+    if content.startswith("{"):
+        try:
+            return json.loads(content)
+        except json.JSONDecodeError:
+            pass
+    # 新格式：首行 status: xxx，随后 --- result --- / --- console ---
+    lines = content.split("\n")
+    out: Dict[str, Any] = {}
+    if lines and lines[0].startswith("status:"):
+        out["status"] = lines[0].split(":", 1)[1].strip()
+    i = 1
+    while i < len(lines):
+        if lines[i].strip() == "--- result ---":
+            i += 1
+            block = []
+            while i < len(lines) and lines[i].strip() != "--- console ---":
+                block.append(lines[i])
+                i += 1
+            out["result"] = "\n".join(block).strip()
+            # 兼容：escalated 时 reason = result；若有 (error_ref: xxx) 则拆出 error_ref
+            if out.get("status") == "escalated" and out.get("result"):
+                out["reason"] = out["result"].split("\n(error_ref:")[0].strip()
+                if "(error_ref:" in out["result"]:
+                    m = re.search(r"\(error_ref:\s*([^)]+)\)", out["result"])
+                    if m:
+                        out["error_ref"] = m.group(1).strip()
+            continue
+        if lines[i].strip() == "--- console ---":
+            i += 1
+            out["console"] = "\n".join(lines[i:]).strip()
+            break
+        i += 1
+    return out
+
+
+def _merge_console_into_results(results_path: str, console: str) -> None:
+    """把控制台输出合并进已有的 results.md（新格式则追加 console 区块，旧 JSON 则转成新格式）"""
+    if not console.strip():
+        return
+    try:
+        with open(results_path, "r", encoding="utf-8") as f:
+            content = f.read()
+        data = parse_results_content(content)
+        status = data.get("status", "completed")
+        result = data.get("result", "")
+        with open(results_path, "w", encoding="utf-8") as f:
+            f.write(_results_text_format(status, result, console))
+    except OSError:
+        pass
 
 
 def execute_decompose(
@@ -269,12 +374,11 @@ def execute_decompose(
     # 3. 获取执行层级
     levels = get_execution_levels(validated_tasks)
 
-    # 4. 按拓扑序逐层串行执行
+    # 4. 按拓扑序逐层串行执行（每层内目标名前加序号，便于调试）
     for level_idx, level_tasks in enumerate(levels):
-        # 串行执行：按拓扑序逐节点执行
-        for task in level_tasks:
+        for task_idx, task in enumerate(level_tasks):
             subdir = os.path.join(goal_dir, task["name"])
-            meta_agent(subdir, depth + 1)
+            meta_agent(subdir, depth + 1, display_index=task_idx + 1)
 
         # 5. 检查子节点状态
         for task in level_tasks:
@@ -285,10 +389,9 @@ def execute_decompose(
                 with open(results_path, "r", encoding="utf-8") as f:
                     results_content = f.read()
 
-                # 检查是否是 escalated
-                try:
-                    results = json.loads(results_content)
-                    if results.get("status") == "escalated":
+                # 检查是否是 escalated（兼容新/旧 results 格式）
+                results = parse_results_content(results_content)
+                if results.get("status") == "escalated":
                         # 写入当前的 escalated results.md
                         write_results_escalated(
                             goal_dir,
@@ -296,8 +399,6 @@ def execute_decompose(
                             os.path.join(task["name"], "error.md"),
                         )
                         return  # 停止执行
-                except json.JSONDecodeError:
-                    pass
 
     # 6. 聚合子节点结果
     aggregate_results(goal_dir, subtasks, goal, permissions, logger)
@@ -342,14 +443,17 @@ def aggregate_results(
 
         logger.log_trace(kind="script_generated", node=goal_dir, note="aggregate")
 
-        # 2. 执行 script.py（聚合逻辑）
-        execute_script(goal_dir, permissions, logger)
-
-        # 检查 results.md 是否成功写入
+        # 2. 执行 script.py（聚合逻辑），并合并控制台输出到 results.md
+        console_output = execute_script(goal_dir, permissions, logger)
         results_path = os.path.join(goal_dir, "results.md")
-        if not os.path.exists(results_path):
-            # 如果 script.py 没有写入 results，手动写入一个默认结果
-            write_results_completed(goal_dir, "Aggregation completed via script.py")
+        if os.path.exists(results_path):
+            _merge_console_into_results(results_path, console_output)
+        else:
+            write_results_completed(
+                goal_dir,
+                "Aggregation completed via script.py",
+                console=console_output,
+            )
 
         # 更新 meta
         update_meta_status(goal_dir, "completed")
@@ -380,31 +484,32 @@ def parse_results(llm_output: str) -> Dict[str, Any]:
     return {"status": "completed", "result": llm_output}
 
 
-def write_results_completed(goal_dir: str, result: str) -> None:
-    """写入 completed 状态的结果"""
+def write_results_completed(
+    goal_dir: str, result: str, console: Optional[str] = None
+) -> None:
+    """写入 completed 状态的结果（控制台风格：首行 status，随后 result / console 区块）"""
     results_path = os.path.join(goal_dir, "results.md")
     if os.path.exists(results_path):
         os.remove(results_path)
-
     with open(results_path, "w", encoding="utf-8") as f:
-        json.dump(
-            {"status": "completed", "result": result}, f, indent=2, ensure_ascii=False
-        )
+        f.write(_results_text_format("completed", result, console))
 
 
-def write_results_escalated(goal_dir: str, reason: str, error_ref: str = None) -> None:
-    """写入 escalated 状态的结果"""
+def write_results_escalated(
+    goal_dir: str,
+    reason: str,
+    error_ref: Optional[str] = None,
+    console: Optional[str] = None,
+) -> None:
+    """写入 escalated 状态的结果（控制台风格：首行 status，随后 reason / console 区块）"""
     results_path = os.path.join(goal_dir, "results.md")
     if os.path.exists(results_path):
         os.remove(results_path)
-
-    data = {"status": "escalated", "reason": reason}
+    reason_line = reason
     if error_ref:
-        data["error_ref"] = error_ref
-
+        reason_line = reason_line + f"\n(error_ref: {error_ref})"
     with open(results_path, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
-
+        f.write(_results_text_format("escalated", reason_line, console))
     update_meta_status(goal_dir, "failed")
 
 

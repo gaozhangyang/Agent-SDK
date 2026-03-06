@@ -16,6 +16,7 @@ from executor import (
     parse_script,
     execute_script,
     parse_results,
+    parse_results_content,
     write_results_completed,
     write_results_escalated,
     update_meta_status,
@@ -94,29 +95,28 @@ class TestWriteResults(unittest.TestCase):
         shutil.rmtree(self.temp_dir)
 
     def test_write_completed(self):
-        """测试写入完成状态"""
+        """测试写入完成状态（results.md 为控制台风格，用 parse_results_content 解析）"""
         write_results_completed(self.node_dir, "test result")
 
         results_path = os.path.join(self.node_dir, "results.md")
         self.assertTrue(os.path.exists(results_path))
 
-        with open(results_path, "r") as f:
-            result = json.load(f)
+        with open(results_path, "r", encoding="utf-8") as f:
+            result = parse_results_content(f.read())
 
         self.assertEqual(result["status"], "completed")
         self.assertEqual(result["result"], "test result")
 
     def test_write_completed_removes_old(self):
         """测试写入完成时删除旧文件"""
-        # 创建旧的 results.md
         old_path = os.path.join(self.node_dir, "results.md")
         with open(old_path, "w") as f:
             f.write("old content")
 
         write_results_completed(self.node_dir, "new result")
 
-        with open(old_path, "r") as f:
-            result = json.load(f)
+        with open(old_path, "r", encoding="utf-8") as f:
+            result = parse_results_content(f.read())
 
         self.assertEqual(result["result"], "new result")
 
@@ -127,8 +127,8 @@ class TestWriteResults(unittest.TestCase):
         results_path = os.path.join(self.node_dir, "results.md")
         self.assertTrue(os.path.exists(results_path))
 
-        with open(results_path, "r") as f:
-            result = json.load(f)
+        with open(results_path, "r", encoding="utf-8") as f:
+            result = parse_results_content(f.read())
 
         self.assertEqual(result["status"], "escalated")
         self.assertEqual(result["reason"], "reason for escalation")
@@ -138,10 +138,10 @@ class TestWriteResults(unittest.TestCase):
         write_results_escalated(self.node_dir, "reason", "error.md")
 
         results_path = os.path.join(self.node_dir, "results.md")
-        with open(results_path, "r") as f:
-            result = json.load(f)
+        with open(results_path, "r", encoding="utf-8") as f:
+            result = parse_results_content(f.read())
 
-        self.assertEqual(result["error_ref"], "error.md")
+        self.assertEqual(result.get("error_ref"), "error.md")
 
 
 class TestUpdateMetaStatus(unittest.TestCase):

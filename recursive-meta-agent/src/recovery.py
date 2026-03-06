@@ -175,6 +175,8 @@ def escalate(node_dir: str, error_content: str) -> None:
 
 def get_node_status(node_dir: str) -> str:
     """获取节点状态"""
+    from executor import parse_results_content
+
     results_path = os.path.join(node_dir, "results.md")
     error_path = os.path.join(node_dir, "error.md")
     meta = read_meta(node_dir)
@@ -182,11 +184,8 @@ def get_node_status(node_dir: str) -> str:
     if os.path.exists(results_path):
         with open(results_path, "r", encoding="utf-8") as f:
             content = f.read()
-        try:
-            result = json.loads(content)
-            return result.get("status", "unknown")
-        except json.JSONDecodeError:
-            return "completed"  # 旧格式
+        result = parse_results_content(content)
+        return result.get("status", "unknown")
 
     if os.path.exists(error_path):
         return "failed"

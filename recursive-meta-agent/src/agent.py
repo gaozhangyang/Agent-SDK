@@ -34,16 +34,22 @@ DEFAULT_META = {
 }
 
 
-def meta_agent(goal_dir: str, depth: int = 0) -> None:
+def meta_agent(
+    goal_dir: str, depth: int = 0, display_index: Optional[int] = None
+) -> None:
     """
     输入：一个包含 goal.md 的目录
     输出：在该目录写入 results.md（completed 或 escalated）
     副作用：写 context.md、script.py、error.md、meta.json、全局记录
+    display_index: 当前层内的序号（1-based），用于终端显示，便于调试
     """
-
     # 初始化 logger
     work_dir = os.path.dirname(goal_dir)
     logger = get_logger(work_dir)
+
+    # 显示用标签：有编号时为 "1. goal_name"，否则为 goal_name
+    goal_name = os.path.basename(goal_dir.rstrip(os.sep))
+    display_label = f"{display_index}. {goal_name}" if display_index is not None else goal_name
 
     # 1. 读取 goal.md 和 meta.json
     goal = read_goal(goal_dir)
@@ -60,7 +66,7 @@ def meta_agent(goal_dir: str, depth: int = 0) -> None:
     seq = logger.log_trace(
         kind="node_start", node=goal_dir, goal_id=meta.get("goal_id", ""), depth=depth
     )
-    logger.log_terminal(seq, goal_dir, "📍", "开始执行")
+    logger.log_terminal(seq, goal_dir, "📍", f"{display_label} 开始执行")
 
     # 检查深度限制
     context = ""
@@ -110,11 +116,11 @@ def meta_agent(goal_dir: str, depth: int = 0) -> None:
 
         # 记录完成
         logger.log_trace(kind="node_completed", node=goal_dir)
-        logger.log_terminal(seq, goal_dir, "📍", "完成 → results.md")
+        logger.log_terminal(seq, goal_dir, "📍", f"{display_label} 完成 → results.md")
 
     except Exception as e:
         logger.log_trace(kind="node_failed", node=goal_dir, error=str(e))
-        logger.log_terminal(seq, goal_dir, "⚠️", f"失败 → {str(e)[:50]}")
+        logger.log_terminal(seq, goal_dir, "⚠️", f"{display_label} 失败 → {str(e)[:50]}")
 
         # 写入 error.md
         error_path = os.path.join(goal_dir, "error.md")
@@ -353,7 +359,7 @@ def run_agent(goal_dir: str, recover_mode: bool = False) -> None:
             recover(goal_dir)
         else:
             # 正常执行
-            meta_agent(goal_dir, depth=0)
+            meta_agent(goal_dir, depth=0, display_index=1)
 
         logger.log_state("session_complete", root=goal_dir)
 
