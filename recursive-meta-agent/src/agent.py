@@ -46,7 +46,7 @@ def meta_agent(
     """
     输入：一个包含 goal.md 的目录
     输出：在该目录写入 results.md（completed 或 escalated）
-    副作用：写 context.md、script.py、error.md、meta.json、全局记录
+    副作用：写 context.md、script.py、results.md、meta.json、全局记录
     display_index: 当前层内的序号（1-based），用于终端显示，便于调试
     """
     # 初始化 logger
@@ -68,7 +68,7 @@ def meta_agent(
     write_meta(goal_dir, meta)
 
     # 2. 加载 permissions.json
-    permissions = load_permissions(goal_dir)
+    permissions, permissions_dir = load_permissions(goal_dir)
 
     # 记录开始
     seq = logger.log_trace(
@@ -90,7 +90,7 @@ def meta_agent(
     else:
         # 3. probe()：理解任务形状
         try:
-            context = probe(goal_dir, goal, permissions, logger)
+            context = probe(goal_dir, goal, permissions, logger, depth, permissions_dir)
             meta["context_truncated"] = os.path.exists(
                 os.path.join(goal_dir, "context.md")
             )
@@ -135,10 +135,10 @@ def meta_agent(
         logger.log_trace(kind="node_failed", node=goal_dir, error=str(e))
         logger.log_terminal(seq, goal_dir, "⚠️", f"{display_label} 失败 → {str(e)[:50]}")
 
-        # 写入 error.md
-        error_path = os.path.join(goal_dir, "error.md")
-        with open(error_path, "w", encoding="utf-8") as f:
-            f.write(str(e))
+        # 写入 escalated 结果，不再单独写 error.md
+        from executor import write_results_escalated
+
+        write_results_escalated(goal_dir, str(e))
 
         # 更新 meta
         meta["status"] = "failed"
@@ -200,7 +200,7 @@ def make_decision(
     prompt = decision_template.format(goal=goal, context=context)
 
     try:
-        result = llm_call(context=context, prompt=prompt)
+        result = llm_call(context=context, prompt=prompt, role="planner")
 
         # 解析 JSON
         decision = parse_decision(result)
@@ -268,7 +268,7 @@ def get_subtasks(
 
     for attempt in range(max_retries):
         try:
-            result = llm_call(context=context, prompt=prompt)
+            result = llm_call(context=context, prompt=prompt, role="planner")
 
             # 解析 JSON
             subtasks = parse_subtasks(result)

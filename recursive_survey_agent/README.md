@@ -20,7 +20,7 @@
 | 架构   | Loop-based 状态机             | 递归函数                          |
 | 复杂度  | 完整的 L1-L5 路线图              | 最小 L1 核心                      |
 | 启动方式 | 需要启动 SDK 服务器               | 直接本地执行                        |
-| 调试   | 需通过日志或 SDK 调试             | 支持直接在 IDE 中断点调试               |
+| 调试   | 需通过日志或 SDK 调试              | 支持直接在 IDE 中断点调试               |
 
 
 ## 核心功能
@@ -245,9 +245,9 @@ python -m pytest tests/test_structure.py -v
 1. 使用前需确保 `recursive-meta-agent` 目录存在（包含 src/agent.py）
 2. 需要配置有效的 LLM API Key（或通过环境变量设置）
 3. **LLM 配置**：确保使用 MiniMax API 而非 OpenAI API
-   - 默认配置已在 `.agent/AGENT.md` 中设置
-   - 环境变量会覆盖配置文件中的设置
-   - 如遇 `401 Unauthorized` 错误，检查 `LLM_BASE_URL` 是否指向正确的 API 地址
+  - 默认配置已在 `.agent/AGENT.md` 中设置
+  - 环境变量会覆盖配置文件中的设置
+  - 如遇 `401 Unauthorized` 错误，检查 `LLM_BASE_URL` 是否指向正确的 API 地址
 4. arXiv API 有速率限制，建议每次请求间隔 3 秒以上
 5. PDF 下载会占用较多存储空间，注意清理
 6. 由于使用直接函数调用，可以直接在 IDE 中对 recursive-meta-agent 进行调试

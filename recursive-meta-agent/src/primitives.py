@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Union, List, Optional
 
 # 全局配置，从环境变量读取
-LLM_MODEL = os.environ.get("LLM_MODEL", "gpt-4")
+LLM_MODEL = os.environ.get("LLM_MODEL", "MiniMax-M2.5")
 LLM_API_KEY = os.environ.get("LLM_API_KEY", "")
 LLM_BASE_URL = os.environ.get("LLM_BASE_URL", "https://api.openai.com/v1")
 
@@ -160,17 +160,34 @@ def make_primitives(node_dir: str, permissions: dict, logger) -> dict:
         except Exception as e:
             return f"Command execution error: {str(e)}"
 
-    def llm_call(context: Union[str, List[str]], prompt: str) -> str:
+    def llm_call(
+        context: Union[str, List[str]], prompt: str, role: str = "default"
+    ) -> str:
         """
         调用 LLM API
         context 是字符串或字符串列表，列表时自动拼接
         超出 token 预算时优先截断低优先级 context，不静默丢弃
         调用前后写 trace.jsonl（kind: llm_call，记录 token 数）
+
+        role 参数用于选择不同的 system prompt：
+        - "default": 通用助手
+        - "coder": 强调输出格式为代码块，禁止解释性文字
+        - "verifier": 强调输出 JSON，严格按 schema
+        - "planner": 强调结构化决策输出
         """
+        # 根据 role 选择 system prompt
+        system_prompts = {
+            "default": "You are a helpful assistant.",
+            "coder": "You are a code generator. Output ONLY the requested code block. Do not include any explanatory text, introductions, or conclusions outside the code block.",
+            "verifier": "You are a verifier. Output ONLY valid JSON. Strictly follow the schema. Do not include any explanatory text outside the JSON.",
+            "planner": "You are a planner. Output clear, structured decisions. Be concise and analytical.",
+        }
+        system_prompt = system_prompts.get(role, system_prompts["default"])
+
         # 动态读取环境变量，确保使用最新的配置
-        llm_model = os.environ.get("LLM_MODEL", "gpt-4")
+        llm_model = os.environ.get("LLM_MODEL", "MiniMax-M2.5")
         llm_api_key = os.environ.get("LLM_API_KEY", "")
-        llm_base_url = os.environ.get("LLM_BASE_URL", "https://api.openai.com/v1")
+        llm_base_url = os.environ.get("LLM_BASE_URL", "http://35.220.164.252:3888/v1/")
 
         # 处理 context
         if isinstance(context, list):
@@ -224,7 +241,7 @@ def make_primitives(node_dir: str, permissions: dict, logger) -> dict:
                 messages=[
                     {
                         "role": "system",
-                        "content": "You are a helpful assistant.",
+                        "content": system_prompt,
                     },
                     {
                         "role": "user",
@@ -233,7 +250,6 @@ def make_primitives(node_dir: str, permissions: dict, logger) -> dict:
                 ],
                 temperature=0.7,
                 max_tokens=4096,
-                stop=["```", "<tool_call>", "I'll ", "Let me "],
             )
 
             output = response.choices[0].message.content

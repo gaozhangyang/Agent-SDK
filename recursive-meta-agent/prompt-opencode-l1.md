@@ -73,7 +73,7 @@ def meta_agent(goal_dir: str, depth: int = 0) -> None:
     """
     输入：一个包含 goal.md 的目录
     输出：在该目录写入 results.md（completed 或 escalated）
-    副作用：写 context.md、script.py、error.md、meta.json、全局记录
+    副作用：写 context.md、script.py、results.md、meta.json、全局记录
     """
 ```
 
@@ -138,9 +138,9 @@ def recover(goal_dir: str) -> None:
     基于文件系统状态恢复执行，不需要额外状态管理。
     scan_tree() 扫描所有节点，topological_order() 排序。
     对每个节点：
-      - results.md 存在且 decomposition_id 一致 → 跳过
+      - results.md 存在且 decomposition_id 一致且 status != escalated → 跳过
       - results.md 存在但 decomposition_id 不一致 → 删除，重新执行
-      - error.md 存在且 retry_count >= MAX_RETRY → 写 escalated
+      - results.md 存在且 status == escalated 且 retry_count >= MAX_RETRY → 跳过
       - 其余 → meta_agent(node, depth)
     """
 ```
@@ -172,7 +172,7 @@ class Logger:
 {"status": "completed", "result": "..."}
 
 # Escalate
-{"status": "escalated", "reason": "...", "error_ref": "error.md"}
+{"status": "escalated", "reason": "..."}
 ```
 
 父节点聚合前先做确定性检查，发现 escalated 立即停止聚合，写入自身的 escalated results.md。
@@ -200,9 +200,9 @@ DEFAULT_META = {
 - 所有 LLM 返回 JSON 的地方，加 try/except 处理解析失败，解析失败时把原始输出和错误信息注回 llm_call 重新生成，最多重试 2 次
 - llm_call 使用的模型和 API key 从环境变量读取：`LLM_MODEL`、`LLM_API_KEY`、`LLM_BASE_URL`
 - MAX_DEPTH 默认 4，MAX_RETRY 默认 3，从环境变量可覆盖
-- 所有文件写入前检查路径权限，违规时抛出 PermissionError 并写 error.md
+- 所有文件写入前检查路径权限，违规时抛出 PermissionError 并写入 escalated results.md
 - script.py 用 exec() 在同进程执行，四个原语通过 make_primitives() 注入执行上下文
-- exec 执行时捕获所有异常，写入 error.md，更新 meta.json status 为 failed
+- exec 执行时捕获所有异常，写入 escalated results.md，更新 meta.json status 为 failed
 
 ---
 

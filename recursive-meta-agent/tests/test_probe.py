@@ -13,11 +13,9 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from probe import (
     get_directory_tree,
-    get_file_sizes,
     get_memory_hint,
-    parse_json_response,
-    check_file_readable,
     write_context,
+    probe,
 )
 
 
@@ -45,23 +43,13 @@ class TestProbeHelpers(unittest.TestCase):
         self.assertIsInstance(result, str)
         self.assertIn("test.md", result)
 
-    def test_get_file_sizes(self):
-        """测试获取文件大小"""
-        test_file = os.path.join(self.node_dir, "test.txt")
-        with open(test_file, "w") as f:
-            f.write("test content")
-
-        result = get_file_sizes(self.node_dir)
-
-        self.assertIsInstance(result, str)
-
     def test_get_memory_hint_empty(self):
         """测试空记忆"""
         self.mock_logger.get_recent_memory = Mock(return_value=[])
 
         result = get_memory_hint(self.mock_logger)
 
-        self.assertEqual(result, "No previous memory available.")
+        self.assertEqual(result, "")
 
     def test_get_memory_hint_with_data(self):
         """测试带数据的记忆"""
@@ -79,52 +67,6 @@ class TestProbeHelpers(unittest.TestCase):
         result = get_memory_hint(self.mock_logger)
 
         self.assertIn("test", result)
-
-    def test_parse_json_response_valid(self):
-        """测试解析有效 JSON"""
-        content = '{"key": "value"}'
-
-        result = parse_json_response(content)
-
-        self.assertEqual(result, {"key": "value"})
-
-    def test_parse_json_response_in_text(self):
-        """测试解析文本中的 JSON"""
-        content = 'Some text {"key": "value"} more text'
-
-        result = parse_json_response(content)
-
-        self.assertIsNotNone(result)
-
-    def test_parse_json_response_invalid(self):
-        """测试解析无效 JSON"""
-        content = "not json"
-
-        result = parse_json_response(content)
-
-        self.assertIsNone(result)
-
-    def test_check_file_readable_allowed(self):
-        """测试允许读取文件"""
-        test_file = os.path.join(self.node_dir, "test.txt")
-        with open(test_file, "w") as f:
-            f.write("test")
-
-        permissions = {"read": ["./"]}
-
-        result = check_file_readable(test_file, self.node_dir, permissions)
-
-        self.assertTrue(result)
-
-    def test_check_file_readable_denied(self):
-        """测试拒绝读取文件"""
-        test_file = "/tmp/test_read.txt"
-
-        permissions = {"read": []}
-
-        result = check_file_readable(test_file, self.node_dir, permissions)
-
-        self.assertFalse(result)
 
     def test_write_context(self):
         """测试写入 context"""
@@ -166,34 +108,45 @@ class TestProbeIntegration(unittest.TestCase):
     def tearDown(self):
         shutil.rmtree(self.temp_dir)
 
-    @patch("probe.make_primitives")
-    def test_ask_llm_for_files(self, mock_make_primitives):
-        """测试询问 LLM 需要读取的文件"""
-        from probe import ask_llm_for_files
+    def test_probe_deterministic(self):
+        """测试 probe 确定性操作"""
+        # 创建子目录
+        subdir = os.path.join(self.node_dir, "subdir")
+        os.makedirs(subdir)
 
-        mock_llm = Mock(return_value='{"files_by_priority": []}')
-        mock_primitives = {"llm_call": mock_llm}
-        mock_make_primitives.return_value = mock_primitives
+        # 创建 results.md (retry 场景)
+        with open(os.path.join(self.node_dir, "results.md"), "w") as f:
+            f.write("status: completed\n\n--- result ---\ntest result")
 
-        result = ask_llm_for_files(
-            tree="tree",
-            sizes="sizes",
-            memory="memory",
-            goal="goal",
-            permissions={},
-            logger=self.mock_logger,
-            node_dir=self.node_dir,
-        )
+        result = probe(self.node_dir, "Test goal", {}, self.mock_logger, depth=0)
 
-        self.assertIsInstance(result, list)
+        # 验证返回了 context
+        self.assertIsInstance(result, str)
 
-    def test_pull_files_with_budget_empty(self):
-        """测试拉取空文件列表"""
-        from probe import pull_files_with_budget
+        # 验证写入了 context.md
+        context_path = os.path.join(self.node_dir, "context.md")
+        self.assertTrue(os.path.exists(context_path))
 
-        result, truncated = pull_files_with_budget([], {}, self.node_dir)
+    def test_probe_with_depth(self):
+        """测试带深度的 probe（子节点场景）"""
+        # 创建父节点 context
+        parent_context_path = os.path.join(self.temp_dir, "context.md")
+        with open(parent_context_path, "w") as f:
+            f.write("Parent context")
+
+        result = probe(self.node_dir, "Test goal", {}, self.mock_logger, depth=1)
 
         self.assertIsInstance(result, str)
+        # 应该有父节点 context
+        self.assertIn("Parent context", result)
+
+    def test_probe_without_previous_results(self):
+        """测试没有上次结果的情况"""
+        result = probe(self.node_dir, "Test goal", {}, self.mock_logger, depth=0)
+
+        self.assertIsInstance(result, str)
+        # 新的probe实现返回目录结构
+        self.assertIn("Directory structure", result)
 
 
 if __name__ == "__main__":

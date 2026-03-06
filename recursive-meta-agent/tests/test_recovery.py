@@ -186,12 +186,13 @@ class TestGetNodeStatus(unittest.TestCase):
 
     def test_status_failed(self):
         """测试失败状态"""
-        error_path = os.path.join(self.node_dir, "error.md")
-        with open(error_path, "w") as f:
-            f.write("error")
+        # 现在不再使用 error.md，失败状态通过 results.md 的 status 字段判断
+        results_path = os.path.join(self.node_dir, "results.md")
+        with open(results_path, "w") as f:
+            f.write("status: escalated\n\n--- result ---\nerror")
 
         result = get_node_status(self.node_dir)
-        self.assertEqual(result, "failed")
+        self.assertEqual(result, "escalated")
 
     def test_status_running(self):
         """测试运行中状态"""
@@ -225,9 +226,10 @@ class TestCheckNodeCompleted(unittest.TestCase):
 
     def test_failed_true(self):
         """测试失败返回 True"""
-        error_path = os.path.join(self.node_dir, "error.md")
-        with open(error_path, "w") as f:
-            f.write("error")
+        # 现在不再使用 error.md，失败状态通过 results.md 判断
+        results_path = os.path.join(self.node_dir, "results.md")
+        with open(results_path, "w") as f:
+            f.write("status: escalated\n\n--- result ---\nerror")
 
         result = check_node_completed(self.node_dir)
         self.assertTrue(result)
@@ -251,8 +253,8 @@ class TestCleanNode(unittest.TestCase):
 
     def test_clean_removes_files(self):
         """测试清理删除文件"""
-        # 创建各种文件
-        files = ["results.md", "error.md", "context.md", "script.py"]
+        # 创建各种文件（不再包含 error.md）
+        files = ["results.md", "context.md", "script.py"]
         for f in files:
             with open(os.path.join(self.node_dir, f), "w") as fp:
                 fp.write("test")

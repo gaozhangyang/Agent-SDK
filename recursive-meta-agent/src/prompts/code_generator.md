@@ -32,12 +32,15 @@ Use these four primitives for I/O and LLM. E.g. list files with bash("ls ...") o
 # Paths and when info is missing (important)
 - The variable `goal_dir` is injected at runtime (current node directory). Use it for paths: e.g. read(goal_dir + "/goal.md"), or bash("ls " + goal_dir). Do not hardcode absolute paths; build paths from goal_dir or from exploration.
 - When you do not have the necessary info (e.g. exact path to a skill or file): either (1) have the script explore first (e.g. bash("find ..."), bash("ls ...") from goal_dir or parent dirs, then read the discovered paths), or (2) if exploration inside one script is not feasible, write a clear error (e.g. write results with status "escalated" and reason describing what path/info was missing). The executor will retry with "Error from previous attempt" in the next run—use that feedback to generate a script that explores or fixes the path.
-- When Context already contains "Error from previous attempt": use that message to drive the new script (e.g. add a discovery step, fix the path that caused FileNotFoundError, or list directories first then proceed). Do not ignore the error; treat it as input for this round.
+- When Context already contains "Error/feedback from previous attempt": use that message to drive the new script (e.g. add a discovery step, fix the path that caused FileNotFoundError, or list directories first then proceed). Do not ignore the error; treat it as input for this round.
 
 ---
 
-Goal:
-{goal}
+Original goal (不变):
+{original_goal}
+
+Current goal (可能已修订):
+{current_goal}
 
 Context:
 {context}
@@ -54,13 +57,24 @@ Output format: reply with two code blocks, e.g.:
 # your plan: what the script will do step by step
 ```
 
-Write the results to {goal_dir}/results.md in JSON format:
-{{"status": "completed", "result": "..."}}
+Write the results to {goal_dir}/results.md in the following format (MUST include both RESULT and OBSERVATIONS):
 
-If you need to explore the environment first, write:
-{{"status": "needs_exploration", "result": "description of what you discovered and what info is still needed"}}
+```
+RESULT: 一句话说明完成了什么或失败原因
+
+OBSERVATIONS:
+- 执行过程中发现的环境事实（文件路径、API 格式、工具行为等）
+- 对后续任务有用的信息写在这里
+```
+
+成功和失败都必须输出这个结构，verifier 依赖它来判断 pass/fail.
 
 If you cannot complete the task, write:
-{{"status": "escalated", "reason": "...", "error_ref": "error.md"}}
+```
+RESULT: escalated
+
+OBSERVATIONS:
+- 详细描述无法完成的原因和缺少的信息
+```
 
 Do NOT output <tool_code>, <tool name="...">, or any tool invocation markup. Only output the script and plan in separate code blocks.

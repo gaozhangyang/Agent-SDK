@@ -21,31 +21,31 @@ DEFAULT_PERMISSIONS = {
 def load_permissions(goal_dir: str) -> Dict[str, Any]:
     """
     加载节点的 permissions.json
-    不存在时使用默认值
+    向上遍历目录树，找到第一个存在 permissions.json 的目录即停止，找到根目录为止。
+    不存在时使用默认值。
+    返回: (permissions_dict, permissions_dir)
+    - permissions_dict: 权限配置
+    - permissions_dir: permissions.json 所在的目录（用于解析相对路径）
     """
-    permissions_path = os.path.join(goal_dir, "permissions.json")
+    current = os.path.abspath(goal_dir)
 
-    if os.path.exists(permissions_path):
-        with open(permissions_path, "r", encoding="utf-8") as f:
-            node_permissions = json.load(f)
+    while True:
+        perm_path = os.path.join(current, "permissions.json")
+        if os.path.exists(perm_path):
+            with open(perm_path, "r", encoding="utf-8") as f:
+                node_permissions = json.load(f)
 
-        # 合并默认权限
-        merged = DEFAULT_PERMISSIONS.copy()
-        merged.update(node_permissions)
-        return merged
-    else:
-        # 检查父目录是否有权限配置，继承权限
-        parent_dir = os.path.dirname(goal_dir)
-        # 防止无限递归：检查是否到达根目录
-        if parent_dir and parent_dir != goal_dir and os.path.exists(parent_dir):
-            # 检查父目录是否有 permissions.json
-            parent_perm_path = os.path.join(parent_dir, "permissions.json")
-            if os.path.exists(parent_perm_path):
-                parent_permissions = load_permissions(parent_dir)
-                # 子节点权限不能超过父节点
-                return inherit_permissions(parent_permissions, DEFAULT_PERMISSIONS)
+            # 合并默认权限
+            merged = DEFAULT_PERMISSIONS.copy()
+            merged.update(node_permissions)
+            # 返回权限配置以及permissions.json所在的目录
+            return merged, current
 
-        return DEFAULT_PERMISSIONS.copy()
+        # 向上查找父目录
+        parent = os.path.dirname(current)
+        if parent == current:  # 到达文件系统根
+            return DEFAULT_PERMISSIONS.copy(), current
+        current = parent
 
 
 def inherit_permissions(

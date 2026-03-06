@@ -1,55 +1,72 @@
 """
 Probe 函数
-以最小代价理解任务形状
+以最小代价理解任务形状 - 退化为纯确定性操作
 """
 
 import os
-import json
 import subprocess
 from typing import Dict, Any, List, Optional
 from logger import get_logger
 from primitives import make_primitives
-from prompts import get_file_probe_prompt
 
 
-def probe(goal_dir: str, goal: str, permissions: dict, logger) -> str:
+def probe(
+    goal_dir: str,
+    goal: str,
+    permissions: dict,
+    logger,
+    depth: int = 0,
+    permissions_dir: str = None,
+) -> str:
     """
-    以最小代价理解任务形状。
-    1. bash 获取目录结构和文件大小（不读文件内容）
-    2. 获取 permissions 允许的目录（如 skills）的结构
-    3. 读取 memory.jsonl 最近 5 条作为历史参考
-    4. llm_call 决定需要读哪些文件（返回 JSON: {files_by_priority: []}）
-    5. 按优先级拉取文件内容，预算耗尽则停止，标记 context_truncated
-    6. 写入 context.md
-    返回：context 字符串
+    以最小代价理解任务形状 - 退化为纯确定性操作。
+    1. bash 扫描目录结构和文件大小
+    2. 自动读取固定候选文件：
+       - goal.md（当前节点，必读）
+       - ../context.md（父节点 context，仅 depth > 0 时加入）
+       - results.md（如存在，说明是 retry，读取上次结果）
+       - .agent/memory.jsonl 最近 5 条（保留）
+       - permissions.json 中允许的外部目录结构（新增）
+    3. 把以上内容拼成 context 字符串，写入 context.md，返回
     """
+    parts = []
 
-    # 1. 获取目录结构和文件大小
-    tree_output = get_directory_tree(goal_dir)
-    sizes_output = get_file_sizes(goal_dir)
+    # 1. 目录结构快照
+    tree = get_directory_tree(goal_dir)
+    parts.append(f"# Directory structure\n{tree}")
 
-    # 2. 获取 permissions 允许的目录结构（如 skills）
-    allowed_dirs_tree = get_allowed_directories_tree(goal_dir, permissions)
-
-    # 3. 获取历史记忆
-    memory_hint = get_memory_hint(logger)
-
-    # 4. LLM 决定需要读哪些文件
-    files_to_read = ask_llm_for_files(
-        tree_output,
-        sizes_output,
-        allowed_dirs_tree,
-        memory_hint,
-        goal,
-        permissions,
-        logger,
-        goal_dir,
+    # 1.5. Allowed external directories (从 permissions.json 读取)
+    # permissions_dir 是 permissions.json 所在的目录，用于正确解析相对路径
+    external_dirs_info = get_external_directories(
+        goal_dir, permissions, permissions_dir
     )
+    if external_dirs_info:
+        parts.append(f"# Allowed external directories\n{external_dirs_info}")
 
-    # 5. 按优先级拉取文件内容
-    context, truncated = pull_files_with_budget(files_to_read, permissions, goal_dir)
+    # 2. 父节点 context（子节点专属，depth > 0）
+    if depth > 0:
+        parent_context_path = os.path.join(goal_dir, "..", "context.md")
+        if os.path.exists(parent_context_path):
+            with open(parent_context_path, "r", encoding="utf-8") as f:
+                content = f.read()
+            parts.append(f"# Parent context\n{content}")
 
-    # 6. 写入 context.md
+    # 3. 上次执行结果（retry 场景）
+    results_path = os.path.join(goal_dir, "results.md")
+    if os.path.exists(results_path):
+        with open(results_path, "r", encoding="utf-8") as f:
+            content = f.read()
+        parts.append(f"# Previous execution result\n{content}")
+
+    # 4. 历史记忆
+    memory = get_memory_hint(logger)
+    if memory:
+        parts.append(f"# Memory hints\n{memory}")
+
+    # 拼接 context
+    context = "\n\n---\n\n".join(parts)
+
+    # 写入 context.md
     context_path = os.path.join(goal_dir, "context.md")
     with open(context_path, "w", encoding="utf-8") as f:
         f.write(context)
@@ -58,8 +75,7 @@ def probe(goal_dir: str, goal: str, permissions: dict, logger) -> str:
     logger.log_trace(
         kind="probe_completed",
         node=goal_dir,
-        files_read=len(files_to_read),
-        context_truncated=truncated,
+        context_length=len(context),
     )
 
     return context
@@ -69,7 +85,7 @@ def get_directory_tree(goal_dir: str) -> str:
     """获取目录结构"""
     try:
         result = subprocess.run(
-            f"find {goal_dir} -maxdepth 3 -type f -name '*.md' -o -name '*.py' -o -name '*.json' 2>/dev/null | head -50",
+            f"find {goal_dir} -maxdepth 2 -type f | head -40",
             shell=True,
             capture_output=True,
             text=True,
@@ -80,63 +96,60 @@ def get_directory_tree(goal_dir: str) -> str:
         return f"Error getting directory tree: {str(e)}"
 
 
-def get_allowed_directories_tree(goal_dir: str, permissions: dict) -> str:
+def get_external_directories(
+    goal_dir: str, permissions: dict, permissions_dir: str = None
+) -> str:
     """
-    获取 permissions 中允许读取的目录结构（如 skills）
+    获取 permissions.json 中允许的外部目录结构
+    扫描 permissions 中配置的 read 路径，列出可用的 skills 和工具
+    permissions_dir: permissions.json 所在的目录，用于正确解析相对路径
     """
-    read_paths = permissions.get("read", [])
+    try:
+        allowed_read = permissions.get("read", [])
+        if not allowed_read:
+            return ""
 
-    if not read_paths:
-        return "No additional read paths configured."
+        lines = []
 
-    tree_parts = ["# Allowed directories (from permissions.json):\n"]
+        # 如果没有提供 permissions_dir，使用 goal_dir
+        if permissions_dir is None:
+            permissions_dir = os.path.abspath(goal_dir)
 
-    for read_path in read_paths:
-        # 处理相对路径
-        if not os.path.isabs(read_path):
-            # 相对于 goal_dir 的父目录
-            base_dir = os.path.dirname(goal_dir)
-            full_path = os.path.normpath(os.path.join(base_dir, read_path))
-        else:
-            full_path = read_path
+        for rel_path in allowed_read:
+            # 跳过特殊路径
+            if rel_path in [".", ".."]:
+                continue
 
-        # 只探索固定的目录，不向上无限探索
-        if full_path and os.path.isdir(full_path):
+            # 解析绝对路径 - 基于 permissions.json 所在的目录
+            abs_path = os.path.abspath(os.path.join(permissions_dir, rel_path))
+
+            if not os.path.exists(abs_path):
+                continue
+
+            # 获取目录结构 (maxdepth 3 以获取足够信息但不过多)
             try:
-                # 只获取目录结构，不读内容
                 result = subprocess.run(
-                    f"find {full_path} -maxdepth 3 -type f \\( -name '*.md' -o -name '*.py' -o -name '*.json' -o -name 'SKILL.md' \\) 2>/dev/null | head -30",
+                    f"find {abs_path} -maxdepth 3 -type f -name '*.py' -o -name '*.md' | head -30",
                     shell=True,
                     capture_output=True,
                     text=True,
                     timeout=10,
                 )
-                if result.stdout.strip():
-                    tree_parts.append(f"\n## {read_path}\n")
-                    tree_parts.append(result.stdout)
+                if result.stdout:
+                    lines.append(f"\n## From: {rel_path}")
+                    lines.append(result.stdout)
             except Exception:
-                pass
+                continue
 
-    return (
-        "".join(tree_parts)
-        if len(tree_parts) > 1
-        else "No additional directories found."
-    )
+        if not lines:
+            return ""
 
+        # 添加说明，提示 agent 可以读取这些目录
+        header = "You have read access to these external directories. Check for SKILL.md files to understand how to use each skill."
+        return header + "\n" + "\n".join(lines)
 
-def get_file_sizes(goal_dir: str) -> str:
-    """获取文件大小"""
-    try:
-        result = subprocess.run(
-            f"find {goal_dir} -maxdepth 2 -type f \\( -name '*.md' -o -name '*.py' -o -name '*.json' \\) -exec wc -c {{}} + 2>/dev/null | head -30",
-            shell=True,
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-        return result.stdout or "No size info"
     except Exception as e:
-        return f"Error getting file sizes: {str(e)}"
+        return ""
 
 
 def get_memory_hint(logger) -> str:
@@ -144,7 +157,7 @@ def get_memory_hint(logger) -> str:
     try:
         memories = logger.get_recent_memory(limit=5)
         if not memories:
-            return "No previous memory available."
+            return ""
 
         hint_lines = ["## Recent Task Patterns:\n"]
         for mem in memories:
@@ -155,143 +168,8 @@ def get_memory_hint(logger) -> str:
             hint_lines.append("")
 
         return "\n".join(hint_lines)
-    except Exception as e:
-        return f"Error getting memory: {str(e)}"
-
-
-def ask_llm_for_files(
-    tree: str,
-    sizes: str,
-    allowed_dirs_tree: str,
-    memory: str,
-    goal: str,
-    permissions: dict,
-    logger,
-    node_dir: str,
-) -> List[Dict[str, Any]]:
-    """
-    调用 LLM 决定需要读取哪些文件
-    """
-    from primitives import make_primitives
-
-    primitives = make_primitives(node_dir, permissions, logger)
-    llm_call = primitives["llm_call"]
-
-    # 加载外部 prompt 模板
-    file_probe_template = get_file_probe_prompt()
-    prompt = file_probe_template.format(
-        tree=tree, sizes=sizes, allowed_dirs=allowed_dirs_tree, memory=memory, goal=goal
-    )
-
-    try:
-        result = llm_call(
-            context=[tree, sizes, allowed_dirs_tree, memory, goal], prompt=prompt
-        )
-
-        # 解析 JSON
-        parsed = parse_json_response(result)
-        if parsed and "files_by_priority" in parsed:
-            return parsed["files_by_priority"]
-
-    except Exception as e:
-        logger.log_trace(kind="probe_llm_error", node=node_dir, error=str(e))
-
-    # 默认返回空列表
-    return []
-
-
-def parse_json_response(response: str) -> Optional[Dict[str, Any]]:
-    """解析 LLM 返回的 JSON"""
-    import re
-
-    # 尝试直接解析
-    try:
-        return json.loads(response)
-    except json.JSONDecodeError:
-        pass
-
-    # 尝试提取 JSON 块
-    json_match = re.search(r"\{[\s\S]*\}", response)
-    if json_match:
-        try:
-            return json.loads(json_match.group())
-        except json.JSONDecodeError:
-            pass
-
-    return None
-
-
-def pull_files_with_budget(
-    files_to_read: List[Dict[str, Any]], permissions: dict, goal_dir: str
-) -> tuple:
-    """
-    按优先级拉取文件内容，预算耗尽则停止
-    返回: (context_str, truncated)
-    """
-    context_parts = []
-    truncated = False
-
-    # 获取 token 预算
-    context_budget = permissions.get(
-        "context_budget", {"total": 200000, "reservedOutput": 4000}
-    )
-    budget = context_budget.get("total", 200000) - context_budget.get(
-        "reservedOutput", 4000
-    )
-
-    current_tokens = 0
-
-    # 按优先级排序
-    priority_order = {"high": 0, "medium": 1, "low": 2}
-    sorted_files = sorted(
-        files_to_read, key=lambda x: priority_order.get(x.get("priority", "low"), 2)
-    )
-
-    for file_info in sorted_files:
-        path = file_info.get("path")
-        if not path:
-            continue
-
-        # 处理相对路径
-        if not os.path.isabs(path):
-            path = os.path.join(goal_dir, path)
-
-        # 检查权限
-        if not check_file_readable(path, goal_dir, permissions):
-            context_parts.append(f"## {path}\n[Permission denied]\n")
-            continue
-
-        # 读取文件
-        if os.path.exists(path):
-            try:
-                with open(path, "r", encoding="utf-8") as f:
-                    content = f.read()
-
-                # 检查预算
-                file_tokens = len(content) // 4
-                if current_tokens + file_tokens > budget:
-                    truncated = True
-                    break
-
-                context_parts.append(f"## {path}\n{content}\n")
-                current_tokens += file_tokens
-
-            except Exception as e:
-                context_parts.append(f"## {path}\n[Error reading: {str(e)}]\n")
-        else:
-            context_parts.append(f"## {path}\n[File not found]\n")
-
-    if truncated:
-        context_parts.append("\n\n[Context truncated due to token budget]\n")
-
-    return "\n\n".join(context_parts), truncated
-
-
-def check_file_readable(path: str, node_dir: str, permissions: dict) -> bool:
-    """检查文件是否可读"""
-    from permissions import check_read_permission
-
-    return check_read_permission(path, permissions, node_dir)
+    except Exception:
+        return ""
 
 
 def write_context(goal_dir: str, context: str) -> None:

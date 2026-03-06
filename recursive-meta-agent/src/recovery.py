@@ -22,6 +22,7 @@ def recover(goal_dir: str) -> None:
     scan_tree() 扫描所有节点，topological_order() 排序
     """
     from agent import meta_agent
+    from executor import parse_results_content
 
     logger = get_logger()
 
@@ -37,33 +38,43 @@ def recover(goal_dir: str) -> None:
         parent_decomp_id = get_parent_decomposition_id(node, goal_dir)
 
         results_path = os.path.join(node, "results.md")
-        error_path = os.path.join(node, "error.md")
 
         # 1. results.md 存在且 decomposition_id 一致 → 跳过
         if os.path.exists(results_path):
+            # 检查 status 是否为 escalated
+            with open(results_path, "r", encoding="utf-8") as f:
+                results_content = f.read()
+            results_data = parse_results_content(results_content)
+            status = results_data.get("status", "not_started")
+
             if meta.get("decomposition_id") == parent_decomp_id:
-                logger.log_trace(kind="recover_skip", node=node, reason="results_valid")
-                continue
+                if status != "escalated":
+                    # 结果有效且未escalated，跳过
+                    logger.log_trace(
+                        kind="recover_skip", node=node, reason="results_valid"
+                    )
+                    continue
+                else:
+                    # 已escalated，检查retry_count
+                    if meta.get("retry_count", 0) >= MAX_RETRY:
+                        logger.log_trace(
+                            kind="recover_escalate", node=node, reason="max_retries"
+                        )
+                        continue  # 已有最终结果，不再重试
+                    # 否则删除重新执行
+                    os.remove(results_path)
+                    logger.log_trace(
+                        kind="recover_invalidate", node=node, reason="retry_available"
+                    )
             else:
                 # decomposition_id 不一致，删除重新执行
-                os.remove(results_path)
+                if os.path.exists(results_path):
+                    os.remove(results_path)
                 logger.log_trace(
                     kind="recover_invalidate", node=node, reason="decomposition_changed"
                 )
 
-        # 2. error.md 存在且 retry_count >= MAX_RETRY → 写 escalated
-        if os.path.exists(error_path):
-            with open(error_path, "r", encoding="utf-8") as f:
-                error_content = f.read()
-
-            if meta.get("retry_count", 0) >= MAX_RETRY:
-                escalate(node, error_content)
-                logger.log_trace(
-                    kind="recover_escalate", node=node, reason="max_retries"
-                )
-                continue
-
-        # 3. 其余 → 重新执行
+        # 2. 重新执行
         # 更新重试次数
         meta["retry_count"] = meta.get("retry_count", 0) + 1
         write_meta(node, meta)
@@ -164,8 +175,7 @@ def escalate(node_dir: str, error_content: str) -> None:
     """
     from executor import write_results_escalated
 
-    error_ref = "error.md"
-    write_results_escalated(node_dir, error_content, error_ref)
+    write_results_escalated(node_dir, error_content)
 
     # 更新 meta
     meta = read_meta(node_dir)
@@ -178,7 +188,6 @@ def get_node_status(node_dir: str) -> str:
     from executor import parse_results_content
 
     results_path = os.path.join(node_dir, "results.md")
-    error_path = os.path.join(node_dir, "error.md")
     meta = read_meta(node_dir)
 
     if os.path.exists(results_path):
@@ -186,9 +195,6 @@ def get_node_status(node_dir: str) -> str:
             content = f.read()
         result = parse_results_content(content)
         return result.get("status", "unknown")
-
-    if os.path.exists(error_path):
-        return "failed"
 
     if meta.get("status") == "running":
         return "running"
@@ -204,13 +210,12 @@ def check_node_completed(node_dir: str) -> bool:
 
 def clean_node(node_dir: str) -> None:
     """清理节点的中间状态"""
-    # 删除 results.md 和 error.md
+    # 删除 results.md 和 context.md、script.py
     results_path = os.path.join(node_dir, "results.md")
-    error_path = os.path.join(node_dir, "error.md")
     context_path = os.path.join(node_dir, "context.md")
     script_path = os.path.join(node_dir, "script.py")
 
-    for path in [results_path, error_path, context_path, script_path]:
+    for path in [results_path, context_path, script_path]:
         if os.path.exists(path):
             os.remove(path)
 

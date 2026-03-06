@@ -54,7 +54,7 @@ class TestLoadPermissions(unittest.TestCase):
 
     def test_load_permissions_default(self):
         """测试加载默认权限"""
-        permissions = load_permissions(self.node_dir)
+        permissions, _ = load_permissions(self.node_dir)
 
         self.assertEqual(permissions["max_depth"], 4)
         self.assertIn("read", permissions)
@@ -66,7 +66,7 @@ class TestLoadPermissions(unittest.TestCase):
         with open(perm_path, "w") as f:
             json.dump(permissions_data, f)
 
-        permissions = load_permissions(self.node_dir)
+        permissions, _ = load_permissions(self.node_dir)
 
         self.assertEqual(permissions["max_depth"], 2)
 
@@ -83,7 +83,7 @@ class TestLoadPermissions(unittest.TestCase):
         child_dir = os.path.join(parent_dir, "child")
         os.makedirs(child_dir)
 
-        child_perms = load_permissions(child_dir)
+        child_perms, _ = load_permissions(child_dir)
 
         # 子节点不能超过父节点
         self.assertLessEqual(child_perms["max_depth"], 3)
