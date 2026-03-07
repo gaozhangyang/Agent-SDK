@@ -67,6 +67,12 @@ OBSERVATIONS:
 - 对后续任务有用的信息写在这里
 ```
 
+**IMPORTANT - DO NOT confuse results.md with data files:**
+- results.md is a SPECIAL meta-agent output file with a FIXED format shown above
+- NEVER write raw data (JSON, text content, etc.) directly to results.md
+- Save your actual data/output to a SEPARATE file (e.g., data/raw_papers.json, data/output.csv)
+- Only write the RESULT + OBSERVATIONS summary to results.md
+
 成功和失败都必须输出这个结构，verifier 依赖它来判断 pass/fail.
 
 If you cannot complete the task, write:

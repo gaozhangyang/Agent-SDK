@@ -585,13 +585,20 @@ def _write_script_failure(goal_dir: str, message: str, console_output: str) -> N
 
 
 def _results_text_format(
-    status: str, result_or_reason: str, console: Optional[str] = None
+    status: str, 
+    result_or_reason: str, 
+    console: Optional[str] = None,
+    observations: Optional[str] = None,
 ) -> str:
     """生成控制台风格 results.md 正文：首行 status，其余为可读区块"""
     lines = [f"status: {status}", ""]
     if result_or_reason:
         lines.append("--- result ---")
         lines.append(result_or_reason.strip())
+        lines.append("")
+    if observations and observations.strip():
+        lines.append("--- observations ---")
+        lines.append(observations.strip())
         lines.append("")
     if console and console.strip():
         lines.append("--- console ---")
@@ -666,8 +673,47 @@ def _merge_console_into_results(results_path: str, console: str) -> None:
         data = parse_results_content(content)
         status = data.get("status", "completed")
         result = data.get("result", "")
+        observations = data.get("observations", "")
+
+        # 检测异常情况：script.py 可能把原始数据写入了 results.md 而不是按格式写入
+        # 如果 result 看起来像原始 JSON 数据（以 [ 或 { 开头，长度很大），说明格式被破坏
+        if result.strip().startswith(("[", "{")) and len(result.strip()) > 500:
+            # 这表明 results.md 被意外覆盖为数据文件，需要重置为正确格式
+            logger = get_logger()
+            if logger:
+                logger.log_trace(
+                    kind="results_md_corrupted",
+                    node=os.path.dirname(results_path),
+                    warning="results.md was overwritten with raw data, resetting format",
+                )
+            
+            # 尝试从 console output 中提取 RESULT: 和 OBSERVATIONS:
+            console_lines = console.split("\n")
+            extracted_result = ""
+            extracted_observations = ""
+            in_observations = False
+            
+            for line in console_lines:
+                if line.strip().startswith("RESULT:"):
+                    extracted_result = line.strip()[7:].strip()
+                elif line.strip().startswith("OBSERVATIONS:"):
+                    in_observations = True
+                elif in_observations and line.strip().startswith("-"):
+                    extracted_observations += line + "\n"
+                elif in_observations and line.strip() and not line.strip().startswith("-"):
+                    in_observations = False
+            
+            # 使用从 console 中提取的信息
+            if extracted_result:
+                result = extracted_result
+            else:
+                result = "Data was saved to a separate file by script.py"
+            
+            if extracted_observations:
+                observations = extracted_observations.strip()
+
         with open(results_path, "w", encoding="utf-8") as f:
-            f.write(_results_text_format(status, result, console))
+            f.write(_results_text_format(status, result, console, observations))
     except OSError:
         pass
 
@@ -914,14 +960,14 @@ def parse_results(llm_output: str) -> Dict[str, Any]:
 
 
 def write_results_completed(
-    goal_dir: str, result: str, console: Optional[str] = None
+    goal_dir: str, result: str, console: Optional[str] = None, observations: Optional[str] = None
 ) -> None:
-    """写入 completed 状态的结果（控制台风格：首行 status，随后 result / console 区块）"""
+    """写入 completed 状态的结果（控制台风格：首行 status，随后 result / console / observations 区块）"""
     results_path = os.path.join(goal_dir, "results.md")
     if os.path.exists(results_path):
         os.remove(results_path)
     with open(results_path, "w", encoding="utf-8") as f:
-        f.write(_results_text_format("completed", result, console))
+        f.write(_results_text_format("completed", result, console, observations))
 
 
 def write_results_escalated(
@@ -930,15 +976,50 @@ def write_results_escalated(
     error_ref: Optional[str] = None,
     console: Optional[str] = None,
 ) -> None:
-    """写入 escalated 状态的结果（控制台风格：首行 status，随后 reason / console 区块）"""
+    """
+    写入 escalated 状态的结果（控制台风格：首行 status，随后 reason / console 区块）。
+    
+    注意：如果之前已经有成功的结果，保留它而不是覆盖。
+    只在真正失败时才写入 escalated 状态。
+    """
     results_path = os.path.join(goal_dir, "results.md")
+    
+    # 检查是否已有结果，如果有的话先读取
+    prev_status = None
+    prev_result = None
+    prev_observations = None
+    
     if os.path.exists(results_path):
-        os.remove(results_path)
+        try:
+            with open(results_path, "r", encoding="utf-8") as f:
+                content = f.read()
+            data = parse_results_content(content)
+            prev_status = data.get("status")
+            prev_result = data.get("result")
+            prev_observations = data.get("observations")
+        except Exception:
+            pass  # 如果读取失败，就忽略之前的结果
+    
+    # 如果之前已经是 completed 状态，不要覆盖它
+    # 只有在之前没有成功结果或者是 failed/escalated 时才写入新的失败状态
+    if prev_status == "completed":
+        # 之前已经成功了，不应该写入 escalated
+        # 这种情况不应该发生，但为了安全起见，不覆盖之前的结果
+        return
+    
+    # 构建结果内容
     reason_line = reason
     if error_ref:
         reason_line = reason_line + f"\n(error_ref: {error_ref})"
+    
+    # 如果之前有结果或 observations，保留它们
+    final_result = reason_line
+    if prev_result and prev_status != "escalated":
+        # 保留之前的结果（可能是部分成功）
+        final_result = f"{reason_line}\n\n--- previous result ---\n{prev_result}"
+    
     with open(results_path, "w", encoding="utf-8") as f:
-        f.write(_results_text_format("escalated", reason_line, console))
+        f.write(_results_text_format("escalated", final_result, console))
     update_meta_status(goal_dir, "failed")
 
 

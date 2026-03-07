@@ -183,7 +183,7 @@ output = bash("""python skills/screening/screen_papers.py \
 ```json
 {
   "llm": {
-    "baseUrl": "http://35.220.164.252:3888/v1/",
+    "baseUrl": "http://35.220.164.252:3888/v1",
     "model": "MiniMax-M2.5",
     "apiKey": "${LLM_API_KEY}"
   },
