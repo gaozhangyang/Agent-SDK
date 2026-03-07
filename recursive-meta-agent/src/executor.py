@@ -97,41 +97,51 @@ def parse_script_plan(llm_output: str) -> tuple:
 
 def parse_verifier_response(llm_output: str) -> dict:
     """
-    解析 verifier 输出。期望格式: {"pass": bool, "feedback": str}
-    revised_goal 已移除，verifier 只做 pass/fail 判断。
+    解析 verifier LLM 的输出。
+    期望格式: {"pass": bool, "feedback": str, "failure_type": str}
+    failure_type: "none" | "insufficient_context" | "execution_error" | "logic_error"
     """
+    import re
+
+    # 清理 markdown 代码块
     cleaned = llm_output.strip()
     if cleaned.startswith("```"):
-        cleaned = re.sub(r"^```[a-z]*\n?", "", cleaned).rstrip("`").strip()
+        cleaned = cleaned[7:] if cleaned.lower().startswith("```json") else cleaned[3:]
+        if cleaned.rstrip().endswith("```"):
+            cleaned = cleaned.rstrip()[:-3]
+        cleaned = cleaned.strip()
 
-    for text in [cleaned, llm_output]:
+    # 尝试解析清理后的 JSON
+    try:
+        result = json.loads(cleaned)
+        if isinstance(result, dict) and "pass" in result:
+            return {
+                "pass": result.get("pass", False),
+                "feedback": result.get("feedback", ""),
+                "failure_type": result.get("failure_type", "logic_error"),
+            }
+    except json.JSONDecodeError:
+        pass
+
+    # fallback：从原始输出中提取 JSON
+    json_match = re.search(r"\{[\s\S]*\}", llm_output)
+    if json_match:
         try:
-            result = json.loads(text)
+            result = json.loads(json_match.group())
             if isinstance(result, dict) and "pass" in result:
                 return {
-                    "pass": bool(result.get("pass", False)),
+                    "pass": result.get("pass", False),
                     "feedback": result.get("feedback", ""),
+                    "failure_type": result.get("failure_type", "logic_error"),
                 }
         except json.JSONDecodeError:
             pass
 
-        m = re.search(r"\{[\s\S]*\}", text)
-        if m:
-            try:
-                result = json.loads(m.group())
-                if isinstance(result, dict) and "pass" in result:
-                    return {
-                        "pass": bool(result.get("pass", False)),
-                        "feedback": result.get("feedback", ""),
-                    }
-            except json.JSONDecodeError:
-                pass
-
     return {
         "pass": False,
         "feedback": f"Failed to parse verifier response: {llm_output[:200]}",
+        "failure_type": "logic_error",
     }
-
 
 # ---------------------------------------------------------------------------
 # results.md 读写工具
@@ -337,10 +347,8 @@ def execute_with_verification(
     """
     直接执行模式，带容错验证循环（马尔可夫结构）。
 
-    循环的唯一用途是处理偶发错误（网络超时、文件权限等）。
-    "信息不足"类问题应在决策阶段通过分解解决，不在此处重试。
-
-    历史只保留上一时刻：last_script、last_feedback。
+    循环的唯一用途是处理偶发错误（execution_error、logic_error）。
+    insufficient_context 直接 escalate，不重试——父节点重跑时会改为 decompose。
     """
     primitives = make_primitives(goal_dir, permissions, logger)
     llm_call = primitives["llm_call"]
@@ -348,7 +356,7 @@ def execute_with_verification(
     last_script, last_feedback = "", ""
 
     for attempt in range(MAX_VERIFY_RETRY):
-        # 历史块：只包含上一时刻，最小化 context
+        # 历史块：只保留上一时刻（马尔可夫结构）
         history_block = ""
         if last_script:
             history_block = (
@@ -384,7 +392,7 @@ def execute_with_verification(
             if not script:
                 script = parse_script(script_plan_content)
 
-            # 写入 script.py（带尝试编号的备份，方便调试）
+            # 写入 script.py + 带编号备份（方便调试）
             script_path = os.path.join(goal_dir, "script.py")
             with open(script_path, "w", encoding="utf-8") as f:
                 f.write(script)
@@ -406,7 +414,7 @@ def execute_with_verification(
             else:
                 execution_result = console_output
 
-            # 验证（只做 pass/fail，不修订 goal）
+            # 验证（pass/fail + failure_type，不修订 goal）
             verifier_template = get_verifier_prompt()
             verifier_prompt = verifier_template.format(
                 original_goal=goal,
@@ -430,20 +438,37 @@ def execute_with_verification(
                     write_results_completed(
                         goal_dir, "Script completed with verification", console=console_output
                     )
-                logger.log_trace(kind="verification_passed", node=goal_dir, attempt=attempt + 1)
+                logger.log_trace(
+                    kind="verification_passed", node=goal_dir, attempt=attempt + 1
+                )
                 return
 
-            # 验证失败，更新上一时刻
-            last_feedback = verification.get("feedback", "Verification failed")
-            last_script = script
+            # 验证失败：区分失败类型
+            failure_type = verification.get("failure_type", "logic_error")
+            feedback = verification.get("feedback", "Verification failed")
 
             logger.log_trace(
                 kind="verification_failed",
                 node=goal_dir,
                 attempt=attempt + 1,
-                feedback=last_feedback,
+                failure_type=failure_type,
+                feedback=feedback,
             )
 
+            if failure_type == "insufficient_context":
+                # 信息不足，重试无意义，直接 escalate。
+                # 父节点重跑此节点时，_read_previous_failure 会读到这个原因，
+                # decision prompt 会引导 LLM 改为 decompose。
+                reason = f"insufficient_context: {feedback}"
+                write_results_escalated(goal_dir, reason)
+                raise RuntimeError(reason)
+
+            # execution_error 或 logic_error：更新上一时刻，继续重试
+            last_feedback = feedback
+            last_script = script
+
+        except RuntimeError:
+            raise  # insufficient_context 的 escalate，直接向上传递
         except Exception as e:
             last_feedback = str(e)
             logger.log_trace(
@@ -452,10 +477,9 @@ def execute_with_verification(
 
     # 达到最大重试次数
     write_results_escalated(
-        goal_dir, f"Verification failed after {MAX_VERIFY_RETRY} attempts"
+        goal_dir, f"Verification failed after {MAX_VERIFY_RETRY} attempts: {last_feedback}"
     )
     raise RuntimeError(f"Verification failed after {MAX_VERIFY_RETRY} attempts")
-
 
 # ---------------------------------------------------------------------------
 # 分解执行

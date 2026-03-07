@@ -55,25 +55,6 @@ recursive_survey_agent/
 └── README.md                 # 项目说明
 ```
 
-## 四个原语
-
-recursive-meta-agent 使用四个原语执行任务：
-
-
-| 原语                          | 说明          | 用法示例                                          |
-| --------------------------- | ----------- | --------------------------------------------- |
-| `read(path)`                | 读取文件内容      | `content = read("skills/arxiv_api/SKILL.md")` |
-| `write(path, content)`      | 写入文件        | `write("data/output.txt", "Hello")`           |
-| `bash(command)`             | 执行 shell 命令 | `output = bash("python script.py")`           |
-| `llm_call(context, prompt)` | 调用 LLM      | `result = llm_call(context, "分析这段文字")`        |
-
-
-**重要**：
-
-- 所有原语直接可用，不需要 import
-- `read` 可以跨目录读取（在 permissions.json 允许范围内）
-- `write` 默认只能写当前节点目录
-- `llm_call` 是唯一的随机性入口
 
 ## Survey Workflow
 

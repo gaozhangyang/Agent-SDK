@@ -15,6 +15,7 @@ from executor import (
     execute_decompose,
     execute_with_verification,
     write_results_escalated,
+    parse_results_content,
 )
 from deps import validate_dependencies, ValidationError
 from recovery import recover
@@ -80,8 +81,13 @@ def meta_agent(
             logger.log_trace(kind="probe_error", node=goal_dir, error=str(e))
             context = ""
 
+        # 读取上次失败原因（如果有），注入决策
+        previous_failure = _read_previous_failure(goal_dir)
+
         # 决策：direct or decompose
-        decision_type = _make_decision(context, goal, permissions, logger, goal_dir)
+        decision_type = _make_decision(
+            context, goal, permissions, logger, goal_dir, previous_failure
+        )
 
     meta["status"] = "running"
     _write_meta(goal_dir, meta)
@@ -141,18 +147,51 @@ def _write_meta(goal_dir: str, meta: Dict[str, Any]) -> None:
         json.dump(meta, f, indent=2, ensure_ascii=False)
 
 
+def _read_previous_failure(goal_dir: str) -> str:
+    """
+    读取上次执行的失败原因（如果有）。
+    只在 results.md 存在且 status 为 escalated 时返回非空字符串。
+    这个信息会注入 decision prompt，让 LLM 知道上次为何失败，
+    避免重试时做出同样的 direct 决策。
+    """
+    results_path = os.path.join(goal_dir, "results.md")
+    if not os.path.exists(results_path):
+        return ""
+    try:
+        with open(results_path, "r", encoding="utf-8") as f:
+            content = f.read()
+        data = parse_results_content(content)
+        if data.get("status") == "escalated":
+            reason = data.get("result", data.get("reason", ""))
+            if reason:
+                return f"# Previous attempt failed\nReason: {reason}"
+    except Exception:
+        pass
+    return ""
+
+
 def _make_decision(
-    context: str, goal: str, permissions: dict, logger, node_dir: str
+    context: str,
+    goal: str,
+    permissions: dict,
+    logger,
+    node_dir: str,
+    previous_failure: str = "",
 ) -> str:
-    """LLM 决策：direct 还是 decompose"""
-    import re
+    """LLM 决策：direct 还是 decompose。
+    previous_failure 非空时注入 prompt，引导 LLM 避免重复错误。
+    """
     from primitives import make_primitives
 
     primitives = make_primitives(node_dir, permissions, logger)
     llm_call = primitives["llm_call"]
 
     decision_template = get_decision_prompt()
-    prompt = decision_template.format(goal=goal, context=context)
+    prompt = decision_template.format(
+        goal=goal,
+        context=context,
+        previous_failure=previous_failure,
+    )
 
     try:
         result = llm_call(context=context, prompt=prompt, role="planner")
