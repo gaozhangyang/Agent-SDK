@@ -42,11 +42,6 @@ def get_code_generator_prompt() -> str:
     return load_prompt("code_generator")
 
 
-def get_aggregator_prompt() -> str:
-    """获取结果聚合 prompt 模板"""
-    return load_prompt("aggregator")
-
-
 def get_decision_prompt() -> str:
     """获取决策 prompt 模板"""
     return load_prompt("decision")

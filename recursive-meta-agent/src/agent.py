@@ -12,7 +12,6 @@ from logger import get_logger, reset_logger
 from permissions import load_permissions
 from probe import probe
 from executor import (
-    execute_direct,
     execute_decompose,
     execute_with_verification,
     merge_results,

@@ -35,7 +35,6 @@ def recover(goal_dir: str) -> None:
     # 对每个节点处理
     for node in sorted_nodes:
         meta = read_meta(node)
-        parent_decomp_id = get_parent_decomposition_id(node, goal_dir)
 
         results_path = os.path.join(node, "results.md")
 
@@ -47,31 +46,49 @@ def recover(goal_dir: str) -> None:
             results_data = parse_results_content(results_content)
             status = results_data.get("status", "not_started")
 
-            if meta.get("decomposition_id") == parent_decomp_id:
-                if status != "escalated":
-                    # 结果有效且未escalated，跳过
-                    logger.log_trace(
-                        kind="recover_skip", node=node, reason="results_valid"
-                    )
-                    continue
-                else:
-                    # 已escalated，检查retry_count
-                    if meta.get("retry_count", 0) >= MAX_RETRY:
+            # 比较子节点自己 description 的 hash
+            goal_path = os.path.join(node, "goal.md")
+            if os.path.exists(goal_path):
+                with open(goal_path, "r", encoding="utf-8") as f:
+                    current_goal = f.read()
+                expected_hash = hashlib.md5(current_goal.encode()).hexdigest()
+
+                if meta.get("decomposition_id") == expected_hash:
+                    if status != "escalated":
+                        # 结果有效且未escalated，跳过
                         logger.log_trace(
-                            kind="recover_escalate", node=node, reason="max_retries"
+                            kind="recover_skip", node=node, reason="results_valid"
                         )
-                        continue  # 已有最终结果，不再重试
-                    # 否则删除重新执行
-                    os.remove(results_path)
+                        continue
+                    else:
+                        # 已escalated，检查retry_count
+                        if meta.get("retry_count", 0) >= MAX_RETRY:
+                            logger.log_trace(
+                                kind="recover_escalate", node=node, reason="max_retries"
+                            )
+                            continue  # 已有最终结果，不再重试
+                        # 否则删除重新执行
+                        os.remove(results_path)
+                        logger.log_trace(
+                            kind="recover_invalidate",
+                            node=node,
+                            reason="retry_available",
+                        )
+                else:
+                    # decomposition_id 不一致，删除重新执行
+                    if os.path.exists(results_path):
+                        os.remove(results_path)
                     logger.log_trace(
-                        kind="recover_invalidate", node=node, reason="retry_available"
+                        kind="recover_invalidate",
+                        node=node,
+                        reason="decomposition_changed",
                     )
             else:
-                # decomposition_id 不一致，删除重新执行
+                # 没有 goal.md，删除重新执行
                 if os.path.exists(results_path):
                     os.remove(results_path)
                 logger.log_trace(
-                    kind="recover_invalidate", node=node, reason="decomposition_changed"
+                    kind="recover_invalidate", node=node, reason="no_goal_file"
                 )
 
         # 2. 重新执行
@@ -153,19 +170,6 @@ def write_meta(node_dir: str, meta: Dict[str, Any]) -> None:
     meta_path = os.path.join(node_dir, "meta.json")
     with open(meta_path, "w", encoding="utf-8") as f:
         json.dump(meta, f, indent=2, ensure_ascii=False)
-
-
-def get_parent_decomposition_id(node_dir: str, root_dir: str) -> str:
-    """获取父节点的 decomposition_id"""
-    # 找到父目录
-    parent_dir = os.path.dirname(node_dir)
-
-    if parent_dir == root_dir or parent_dir == "":
-        return ""
-
-    # 读取父目录的 meta.json
-    parent_meta = read_meta(parent_dir)
-    return parent_meta.get("decomposition_id", "")
 
 
 def escalate(node_dir: str, error_content: str) -> None:

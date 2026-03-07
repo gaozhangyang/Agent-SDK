@@ -16,7 +16,6 @@ from recovery import (
     topological_order,
     read_meta,
     write_meta,
-    get_parent_decomposition_id,
     escalate,
     get_node_status,
     check_node_completed,
@@ -140,23 +139,6 @@ class TestMetaOperations(unittest.TestCase):
             result = json.load(f)
 
         self.assertEqual(result["status"], "completed")
-
-    def test_get_parent_decomposition_id(self):
-        """测试获取父节点 decomposition_id"""
-        # 创建父节点
-        parent_dir = os.path.join(self.temp_dir, "parent")
-        os.makedirs(parent_dir)
-        parent_meta = {"decomposition_id": "parent_hash"}
-        with open(os.path.join(parent_dir, "meta.json"), "w") as f:
-            json.dump(parent_meta, f)
-
-        # 创建子节点
-        child_dir = os.path.join(parent_dir, "child")
-        os.makedirs(child_dir)
-
-        result = get_parent_decomposition_id(child_dir, self.temp_dir)
-
-        self.assertEqual(result, "parent_hash")
 
 
 class TestGetNodeStatus(unittest.TestCase):

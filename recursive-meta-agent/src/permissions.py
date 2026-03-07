@@ -9,9 +9,7 @@ from pathlib import Path
 
 # 默认权限配置
 DEFAULT_PERMISSIONS = {
-    "read": [],  # 默认允许读当前目录和父目录
-    "write": ["./"],  # 默认只能写当前目录
-    "bash": {"network": True, "delete": True},
+    "bash": {"network": False, "delete": False},
     "max_depth": 4,
     "max_output_length": 102400,
     "context_budget": {"total": 200000, "reservedOutput": 4000},
@@ -60,22 +58,6 @@ def inherit_permissions(
     if "max_depth" in child:
         result["max_depth"] = min(child["max_depth"], parent.get("max_depth", 4))
 
-    # 读取权限：子节点只能缩小，不能扩大
-    if "read" in child:
-        parent_read = set(parent.get("read", []))
-        child_read = set(child.get("read", []))
-        result["read"] = (
-            list(parent_read & child_read) if parent_read else list(child_read)
-        )
-
-    # 写入权限：子节点只能缩小，不能扩大
-    if "write" in child:
-        parent_write = set(parent.get("write", []))
-        child_write = set(child.get("write", []))
-        result["write"] = (
-            list(parent_write & child_write) if parent_write else list(child_write)
-        )
-
     # bash 权限
     if "bash" in child:
         result["bash"] = {
@@ -112,45 +94,11 @@ def validate_permission(
     """
     校验权限
     """
-    path_abs = os.path.abspath(path)
-    node_dir_abs = os.path.abspath(node_dir)
-
-    if permission_type == "read":
-        allowed = permissions.get("read", [])
-        if not allowed:
-            # 默认允许读当前目录和.agent目录
-            work_dir = os.path.dirname(node_dir_abs)
-            agent_dir = os.path.join(work_dir, ".agent")
-            return path_abs.startswith(node_dir_abs) or path_abs.startswith(agent_dir)
-
-        for allow in allowed:
-            allow_abs = os.path.abspath(os.path.join(node_dir_abs, allow))
-            if (
-                path_abs.startswith(allow_abs.rstrip("/") + "/")
-                or path_abs == allow_abs
-            ):
-                return True
-        return False
-
-    elif permission_type == "write":
-        allowed = permissions.get("write", [])
-        if not allowed:
-            return path_abs.startswith(node_dir_abs)
-
-        for allow in allowed:
-            allow_abs = os.path.abspath(os.path.join(node_dir_abs, allow))
-            if (
-                path_abs.startswith(allow_abs.rstrip("/") + "/")
-                or path_abs == allow_abs
-            ):
-                return True
-        return False
-
-    elif permission_type == "bash":
+    if permission_type == "bash":
         bash_perms = permissions.get("bash", {})
         return bash_perms.get("network", True) or bash_perms.get("delete", True)
 
-    return False
+    return True  # 默认允许 read/write
 
 
 def check_read_permission(

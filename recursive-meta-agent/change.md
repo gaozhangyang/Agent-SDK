@@ -1,220 +1,369 @@
 # Meta-Agent 修改清单
 
-P1 是已确认的新行为尚未实现，P2 是架构优化。
+> 来源：设计讨论，共8条变更。按模块分组，每条说明**改什么**、**怎么改**、**为什么**。
 
 ---
 
-### [P1-2] 子节点部分失败时父节点 retry 失败子任务（executor.py）
+## 原则回顾
 
-**现状**：`execute_decompose` 发现子节点 escalated 直接 `return`，丢弃已完成子节点的结果。
+本次修改围绕三个核心方向：
+1. **探索是目标，容错是机制**：把"信息不足"的处理从执行层移到决策层
+2. **只有父子信息流**：删除兄弟节点横向依赖，父节点 context.md 作为信息中转池
+3. **用 prompt 约束替代运行时补丁**：在 LLM 输入侧解决问题，不在解析层打补丁
 
-**修改**：发现某子节点 escalated 时，不立即 return，而是：
+---
 
-1. 记录失败的子任务名
-2. 以**已完成子节点的 results 作为 context** 重新调用 `meta_agent` 执行失败子任务（最多 MAX_RETRY 次）
-3. 重试仍失败，才向上 escalate
+## 变更1：合并 `execute_direct` 和 `execute_with_verification`
+
+**文件**：`executor.py`
+
+**改什么**：
+- 删除 `execute_direct` 函数全部代码
+- 所有调用 `execute_direct` 的地方改为调用 `execute_with_verification`
+- `MAX_VERIFY_RETRY` 从 3 降到 2
+
+**怎么改**：
+```python
+# 删除整个 execute_direct 函数
+
+# MAX_VERIFY_RETRY 改为
+MAX_VERIFY_RETRY = int(os.environ.get("MAX_VERIFY_RETRY", "2"))
+```
+
+**为什么**：两个函数高度重叠，`execute_direct` 是 `execute_with_verification` 的简化版。验证循环简化后只剩容错用途，保留一个函数即可。
+
+---
+
+## 变更2：删除死代码 `aggregate_results`
+
+**文件**：`executor.py`、`prompts/aggregator.md`、`prompts/` 加载模块
+
+**改什么**：
+- 删除 `executor.py` 中的 `aggregate_results` 函数全部代码
+- 删除 `prompts/aggregator.md` 文件
+- 删除 `prompts/__init__.py`（或同等模块）中 `get_aggregator_prompt` 的导入和定义
+- 删除 `executor.py` 顶部对 `get_aggregator_prompt` 的 import
+
+**为什么**：`merge_results` 已完全替代 `aggregate_results`，后者是死代码，保留只增加维护负担。
+
+---
+
+## 变更3：简化 `permissions.json` 结构
+
+**文件**：`permissions.json`（根节点）、`permissions.py`
+
+**改什么**：
+删除未被实际执行的 `read`/`write` 白名单字段，只保留真正生效的字段：
+
+```json
+{
+  "max_depth": 4,
+  "bash": {
+    "network": false,
+    "delete": false
+  }
+}
+```
+
+在 `permissions.py` 中同步删除对 `read`/`write` 白名单的解析和校验逻辑。
+
+**为什么**：白名单在代码层面没有被强制执行，保留会造成"看起来有权限控制"的误导。简化为只保留真正有效的字段，更诚实，也更简单。
+
+---
+
+## 变更4：明确 `context.md` 的所有权和写入机制
+
+**文件**：`probe.py`、`executor.py`（`execute_decompose` 函数）
+
+**改什么**：
+
+`context.md` 有且仅有两个写入时机，其他任何地方不得写入：
+
+**时机1：probe 阶段初始化**（已有，格式保持不变）
+```
+# Initial Context
+{目录结构}
+
+# Parent Context
+{../context.md 内容，仅 depth > 0}
+
+# Memory Hints
+{最近5条 memory}
+```
+
+**时机2：execute_decompose 中每个子节点完成后追加**
+
+在 `execute_decompose` 的子节点执行循环里，每个子节点完成后立即执行：
+
+```python
+def _append_observations_to_parent_context(goal_dir: str, subtask_name: str) -> None:
+    """把子节点的 OBSERVATIONS 追加到父节点的 context.md"""
+    subdir = os.path.join(goal_dir, subtask_name)
+    results_path = os.path.join(subdir, "results.md")
+    context_path = os.path.join(goal_dir, "context.md")
+
+    if not os.path.exists(results_path):
+        return
+
+    with open(results_path, "r", encoding="utf-8") as f:
+        content = f.read()
+
+    data = parse_results_content(content)
+    observations = data.get("observations", "").strip()
+
+    if not observations:
+        return
+
+    with open(context_path, "a", encoding="utf-8") as f:
+        f.write(f"\n\n# From: {subtask_name}\n{observations}")
+```
+
+在 `execute_decompose` 的每层循环中，子节点执行完后立即调用：
 
 ```python
 for task in level_tasks:
     subdir = os.path.join(goal_dir, task["name"])
-    results = parse_results_content(open(results_path).read())
-    if results.get("status") == "escalated":
-        retry_count = read_meta(subdir).get("retry_count", 0)
-        if retry_count < MAX_RETRY:
-            update_meta(subdir, retry_count=retry_count + 1)
-            meta_agent(subdir, depth + 1)  # 重试，此时 context.md 包含兄弟节点结果
-        else:
-            write_results_escalated(goal_dir, f"Subtask {task['name']} failed after retries")
-            return
+    meta_agent(subdir, depth + 1, display_index=task_idx + 1)
+    # 子节点完成后，把 OBSERVATIONS 追加到父节点 context.md
+    _append_observations_to_parent_context(goal_dir, task["name"])
 ```
+
+**为什么**：新设计只保留父子信息流，删除兄弟节点横向依赖。父节点的 `context.md` 作为动态信息池，下一个子节点通过 probe 自然继承前驱节点的输出。`depends_on` 退化为纯拓扑排序工具，不再用于直接文件读取。
 
 ---
 
-### [P1-3] execute_with_verification 改为马尔可夫结构，删除 needs_exploration（executor.py）
+## 变更5：`decomposition_id` 粒度降到子节点级别
 
-**现状**：history 累积所有历史，needs_exploration 状态绕过重试计数可无限循环。
+**文件**：`executor.py`（`execute_decompose`）、`recovery.py`
 
-**修改**：
+**改什么**：
 
-1. **删除 needs_exploration 状态**。信息不足时，LLM 在 script.py 里主动调用 `bash`/`read` 探索，或通过 decision 阶段选择 decompose 拆出探索子任务。
-
-2. **history 退化为只保留上一时刻**：`last_script`、`last_feedback`、`last_revised_goal`，不累积。
-
-3. **保留 original_goal**，`code_generator` prompt 同时注入 `original_goal` 和 `current_revised_goal`，防止目标漂移。
-
-4. **revised_goal 不写文件**，只作为下一次 code_generator prompt 的注入变量，`goal.md` 始终保持原始用户意图。
+**executor.py**：创建子节点时，对每个子节点单独计算 hash，写入该子节点自己的 `meta.json`：
 
 ```python
-original_goal = goal
-last_script, last_feedback, last_revised_goal = "", "", ""
+import hashlib
 
-for attempt in range(MAX_VERIFY_RETRY):
-    current_goal = last_revised_goal or original_goal
-
-    prompt = code_gen_template.format(
-        original_goal=original_goal,
-        current_goal=current_goal,
-        last_script=last_script,
-        last_feedback=last_feedback,
-        goal_dir=goal_dir,
-        context=context,
-    )
-
-    script, plan = parse_script_plan(llm_call(..., prompt))
-    console = execute_script(...)
-    verification = verifier_llm_call(original_goal, plan, script, console)
-
-    if verification["pass"]:
-        return
-
-    last_feedback = verification["feedback"]
-    last_revised_goal = verification.get("revised_goal") or current_goal
-    last_script = script  # 保留上一版 script 作为参考
+# 创建子节点时
+for subtask in subtasks:
+    subdir = os.path.join(goal_dir, subtask["name"])
+    subtask_hash = hashlib.md5(subtask["description"].encode()).hexdigest()
+    
+    meta = {
+        ...
+        "decomposition_id": subtask_hash,  # 只对自己的 description 算 hash
+        ...
+    }
 ```
+
+删除父节点 `meta.json` 中写入 `decomposition_id` 的逻辑。
+
+**recovery.py**：Recovery 校验改为比较子节点自己的 hash：
+
+```python
+# 旧逻辑：比较父节点的 decomposition_id
+parent_decomp_id = get_parent_decomposition_id(node, goal_dir)
+if meta['decomposition_id'] == parent_decomp_id: ...
+
+# 新逻辑：比较子节点自己 description 的 hash
+current_goal = read(f"{node}/goal.md")
+expected_hash = hashlib.md5(current_goal.encode()).hexdigest()
+if meta['decomposition_id'] == expected_hash: ...
+```
+
+**为什么**：原来对整个 subtasks 列表算 hash，任何子任务的变化都会让所有子节点结果作废。新粒度下，只有该子节点自己的目标描述变了，它的结果才作废，兄弟节点不受影响。
 
 ---
 
-### [P1-4] 合并 verifier + revise 为一次 llm_call（executor.py + prompts/verifier.md）
+## 变更6：删除数据污染检测，改在 prompt 约束
 
-**现状**：verifier 和 revise 是两次独立的 llm_call，revise 看不到 script 和执行结果。
+**文件**：`executor.py`（`_merge_console_into_results`）、`prompts/code_generator.md`
 
-**修改**：合并为一次调用，输出格式：
+**改什么**：
 
-```json
-{
-  "pass": true/false,
-  "feedback": "具体哪里不对，指出是哪几行代码的问题",
-  "revised_goal": "修订后的 goal（不需要修订时为 null）"
-}
+**executor.py**，删除 `_merge_console_into_results` 中的以下代码段：
+
+```python
+# 删除这整段
+if result.strip().startswith(("[", "{")) and len(result.strip()) > 500:
+    # 这表明 results.md 被意外覆盖为数据文件，需要重置为正确格式
+    logger = get_logger()
+    ...（整段删除）
 ```
 
-verifier prompt（`prompts/verifier.md`）里注入：`original_goal`、`plan`、`script`、`console_output`，要求同时输出以上三个字段。删除 `prompts/revise.md`。
+**prompts/code_generator.md**，在输出格式约束部分增加：
 
----
+```
+## 输出格式硬性约束
 
-### [P1-5] script.py 输出格式标准化（prompts/code_generator.md）
-
-**修改**：在 `code_generator` prompt 里明确要求 script.py 在末尾写入结构化输出：
+script.py 写入 results.md 时，必须严格遵守以下格式，无一例外：
 
 ```
 RESULT: 一句话说明完成了什么或失败原因
+
 OBSERVATIONS:
-- 执行过程中发现的环境事实（文件路径、API 格式、工具行为等）
-- 对后续任务有用的信息写在这里
+- 对后续任务有用的环境事实（文件路径、接口格式、工具行为等）
+- 每条以 "- " 开头
 ```
 
-成功和失败都必须输出这个结构，verifier 依赖它来判断 pass/fail。
+**严禁以下行为**：
+- 将原始数据（JSON、列表、二进制）直接写入 results.md
+- 数据文件必须写到其他路径（如 {goal_dir}/output/ 下），results.md 只写摘要
+- 不得使用 import os / open() / subprocess 等直接操作文件系统，必须通过注入的原语
+```
+
+**为什么**：用启发式规则在解析层修复上游错误是补丁，不是解法。从 prompt 约束源头杜绝这类输出。
 
 ---
 
-### [P1-6] merge_results 保留 observations 区块（executor.py）
+## 变更7：verifier 删除 `revised_goal`，只做 pass/fail
 
-**现状**：`merge_results` 只保留 result 区块，observations 丢失。`parse_results_content` 不解析 observations。
+**文件**：`executor.py`（`parse_verifier_response`、`execute_with_verification`）、`prompts/verifier.md`
 
-**修改**：
+**改什么**：
 
-1. `parse_results_content` 新增解析 `--- observations ---` 区块，存入 `out["observations"]`。
+**prompts/verifier.md**，修改输出格式，删除 `revised_goal` 字段：
 
-2. `merge_results` 每个子节点保留 result + observations，丢弃 console：
+```
+输出严格为 JSON，格式如下，不包含其他内容：
+{
+  "pass": true 或 false,
+  "feedback": "失败原因的简短描述，pass 为 true 时留空"
+}
+```
+
+**executor.py**，`parse_verifier_response` 简化：
 
 ```python
-merged_content += f"## Subtask: {item['subtask']}\n"
-merged_content += f"Status: {item['status']}\n\n"
-if item.get("result"):
-    merged_content += f"--- result ---\n{item['result']}\n\n"
-if item.get("observations"):
-    merged_content += f"--- observations ---\n{item['observations']}\n\n"
-# console 不向上传递
+def parse_verifier_response(llm_output: str) -> dict:
+    # ... 解析逻辑不变，但返回值去掉 revised_goal ...
+    return {
+        "pass": result.get("pass", False),
+        "feedback": result.get("feedback", ""),
+        # 删除 "revised_goal": ...
+    }
 ```
 
----
-
-### [P1-7] permissions.json 改为根节点单例，子节点向上查找（permissions.py + executor.py）
-
-**现状**：每个子节点创建时都写一份 permissions.json。
-
-**修改**：
-
-1. `load_permissions(node_dir)` 改为向上遍历目录树，找到第一个存在 `permissions.json` 的目录即停止，找到根目录为止。
+**executor.py**，`execute_with_verification` 中删除所有 `revised_goal` 相关逻辑：
 
 ```python
-def load_permissions(node_dir: str) -> dict:
-    current = os.path.abspath(node_dir)
-    while True:
-        perm_path = os.path.join(current, "permissions.json")
-        if os.path.exists(perm_path):
-            with open(perm_path) as f:
-                return json.load(f)
-        parent = os.path.dirname(current)
-        if parent == current:  # 到达文件系统根
-            return {}
-        current = parent
+# 删除
+last_revised_goal = ""
+current_goal = last_revised_goal or original_goal
+revised_goal = verification.get("revised_goal")
+last_revised_goal = revised_goal or current_goal
+
+# 简化后，循环只维护两个变量
+last_script = ""
+last_feedback = ""
 ```
 
-2. `execute_decompose` 里删除给每个子节点写 permissions.json 的逻辑。
+**为什么**：`revised_goal` 的存在是为了引导重试方向，但重试次数降到2、且只处理偶发错误后，直接把 `feedback` 注入下一轮 prompt 就足够了。删掉可以简化 verifier prompt、解析逻辑和循环状态。
 
 ---
 
-## P2：架构优化
+## 变更8：`code_generator.md` 明确四个原语的约束
 
-### [P2-1] error.md 合并进 results.md，不再单独存文件（executor.py + recovery.py）
+**文件**：`prompts/code_generator.md`
 
-**现状**：失败时同时写 `error.md` 和 `results.md`（escalated）。recovery 里有 `if os.path.exists(error_path)` 检查。
+**改什么**，在 prompt 开头增加原语说明区块：
 
-**修改**：
+```
+## 可用原语（唯一允许的操作接口）
 
-1. 失败信息完整写入 `results.md` 的 console 区块，删除单独写 `error.md` 的逻辑。
+以下四个原语已注入到脚本运行环境，直接调用即可，无需 import：
 
-2. `recovery.py` 改为只读 `results.md` 的 status 字段判断失败，读 console 区块获取错误信息，删除所有 `error_path` 相关检查。
+read(path: str) -> str
+    读取文件内容。可读取任意有权限的路径，包括父节点的 context.md。
 
-3. `execute_with_verification` 的第二次进入（retry）时，error 信息从 `results.md` 的 console 区块读取，注入 code_generator prompt。
+write(path: str, content: str) -> None
+    写文件。只能写当前节点目录（{goal_dir}）内的路径，不得写父节点或兄弟节点目录。
+
+bash(command: str) -> str
+    执行 shell 命令，返回完整输出。
+
+llm_call(context: str | list, prompt: str, role: str = "default") -> str
+    调用 LLM。role 可选：default / coder / verifier / planner。
+
+## 严格禁止
+
+- 禁止 import os、import subprocess、open()、pathlib 等直接文件系统操作
+- 禁止写当前节点目录以外的路径
+- 禁止将原始数据直接写入 results.md（见输出格式约束）
+
+## OBSERVATIONS 的写作原则
+
+OBSERVATIONS 面向下游依赖任务，写作时问自己：
+"如果另一个任务依赖我的输出，它最需要知道什么？"
+
+好的 OBSERVATIONS 示例：
+- skill_x 的调用方式：bash("skill_x --input {file} --output {dir}")
+- 输出文件路径：{goal_dir}/output/result.json
+- 注意：输入必须是 UTF-8 编码，输出目录需预先存在
+
+坏的 OBSERVATIONS 示例：
+- 任务完成了（废话，不包含可用信息）
+- 见上方结果（没有提炼，让下游自己去找）
+```
+
+**为什么**：LLM 生成的 script 可能用错原语参数，或绕过原语直接操作文件系统。在 prompt 里明确签名和禁止项，比在运行时检测更根本。OBSERVATIONS 写作原则对应变更4，确保信息流传递的质量。
 
 ---
 
-### [P2-2] plan.md 不落盘，作为内存变量传递（executor.py）
+## 变更9：decision prompt 增加 context 充分性评估
 
-**现状**：`execute_with_verification` 把 plan 写入 `plan.md`。
+**文件**：`prompts/decision.md`
 
-**修改**：plan 只作为局部变量，在 `execute_with_verification` 函数内传递给 verifier，不写文件。删除所有 `plan_path` 写文件逻辑。
+**改什么**，在决策 prompt 里增加 context 评估维度：
+
+```
+## 决策标准
+
+在返回 "direct" 之前，先评估以下问题：
+1. 我是否清楚完成这个目标需要哪些具体信息（文件路径、接口格式、工具用法）？
+2. 这些信息是否已经在 context 中？
+
+如果两个问题都是"是"，返回 "direct"。
+
+如果有信息缺口，返回 "decompose"，并把探索步骤作为第一个子任务：
+{
+  "type": "decompose",
+  "subtasks": [
+    {
+      "name": "explore_environment",
+      "description": "具体说明需要探索什么、期望获得什么信息",
+      "depends_on": []
+    },
+    {
+      "name": "execute_main_task",
+      "description": "主任务描述",
+      "depends_on": ["explore_environment"]
+    }
+  ]
+}
+
+## 关键原则
+
+不要用"先试试看"代替"先想清楚"。
+如果预见到需要两步完成（先探索，再执行），直接分解，不要寄希望于重试。
+```
+
+**为什么**：这是改变1的落地。让 LLM 在决策阶段就识别"信息不足"，通过分解解决，而不是在执行层循环撞墙。`explore_first` 本质上是 `decompose` 的特例，不需要新增决策类型。
 
 ---
 
-### [P2-3] llm_call system prompt 按调用类型分化（primitives.py）
+## 执行顺序建议
 
-**现状**：所有 llm_call 共用 `"You are a helpful assistant."` 作为 system prompt。
-
-**修改**：`llm_call` 新增可选参数 `role: str = "default"`，根据 role 选择对应的 system prompt：
-
-- `"coder"`：强调输出格式为代码块，禁止解释性文字
-- `"verifier"`：强调输出 JSON，严格按 schema
-- `"planner"`：强调结构化决策输出
-
-各调用点传入对应 role。prompts/ 目录下各 .md 文件配套更新。
-
----
-
-### [P2-4] context.md 生命周期明确（probe.py）
-
-**现状**：context.md 每次 probe 时覆盖写入，子节点读到的 `../context.md` 是父节点最新一次 probe 的结果。
-
-**行为确认**（无需代码改动，只是明确约定）：
-- context.md 在每次 `meta_agent` 调用时由 probe 覆盖写入，这是预期行为
-- 子节点读到的 `../context.md` 是父节点最新的 context，信息更新而不是历史快照
-- context.md **不删除**，因为子节点需要读取
+1. 变更2（删死代码）—— 最简单，先清理
+2. 变更1（合并函数）
+3. 变更7（简化 verifier）
+4. 变更3（简化 permissions）
+5. 变更5（decomposition_id 粒度）
+6. 变更4（context.md 所有权）—— 需要同时改 probe.py 和 executor.py
+7. 变更6（删补丁）+ 变更8（code_generator prompt）—— 成对处理
+8. 变更9（decision prompt）—— 最后处理，依赖前面的结构稳定
 
 ---
 
-## 修改涉及的文件汇总
+## 重要
 
-| 文件 | 涉及改动 |
-|------|---------|
-| `primitives.py` | P0-1（删 stop tokens）、P2-3（system prompt 分化） |
-| `executor.py` | P0-2、P0-3、P1-2、P1-3、P1-4、P1-6、P2-1、P2-2 |
-| `probe.py` | P1-1（退化为确定性） |
-| `recovery.py` | P0-2（decomposition_id 校验生效）、P2-1（读 results.md 代替 error.md） |
-| `permissions.py` | P1-7（向上查找） |
-| `agent.py` | P1-3（传入 original_goal）、P1-7（不再写子节点 permissions） |
-| `prompts/verifier.md` | P1-4（合并 revise，新增输出字段） |
-| `prompts/revise.md` | P1-4（删除此文件） |
-| `prompts/code_generator.md` | P1-3（注入 original_goal / last_script / last_feedback）、P1-5（要求 OBSERVATIONS 输出） |
-| `prompts/file_probe.md` | P1-1（probe 不再调用 LLM，此文件可删除） |
+完成任务后需要更新README.md(只做必要修改)

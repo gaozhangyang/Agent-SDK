@@ -27,8 +27,6 @@ class TestDefaultPermissions(unittest.TestCase):
 
     def test_default_permissions_structure(self):
         """测试默认权限结构"""
-        self.assertIn("read", DEFAULT_PERMISSIONS)
-        self.assertIn("write", DEFAULT_PERMISSIONS)
         self.assertIn("bash", DEFAULT_PERMISSIONS)
         self.assertIn("max_depth", DEFAULT_PERMISSIONS)
         self.assertIn("max_output_length", DEFAULT_PERMISSIONS)
@@ -57,7 +55,7 @@ class TestLoadPermissions(unittest.TestCase):
         permissions, _ = load_permissions(self.node_dir)
 
         self.assertEqual(permissions["max_depth"], 4)
-        self.assertIn("read", permissions)
+        self.assertIn("bash", permissions)
 
     def test_load_permissions_existing(self):
         """测试加载已存在的权限配置"""
@@ -142,7 +140,8 @@ class TestValidatePermission(unittest.TestCase):
 
     def test_validate_read_allowed(self):
         """测试允许读取"""
-        permissions = {"read": ["./"]}
+        # 现在默认允许读取
+        permissions = {"bash": {"network": True}}
 
         result = validate_permission("read", self.node_dir, permissions, self.node_dir)
 
@@ -150,11 +149,12 @@ class TestValidatePermission(unittest.TestCase):
 
     def test_validate_read_denied(self):
         """测试拒绝读取"""
-        permissions = {"read": []}
+        # 现在默认允许读取
+        permissions = {"bash": {"network": True}}
 
         result = validate_permission("read", "/tmp/test", permissions, self.node_dir)
 
-        self.assertFalse(result)
+        self.assertTrue(result)
 
     def test_validate_write_allowed(self):
         """测试允许写入"""
@@ -166,11 +166,12 @@ class TestValidatePermission(unittest.TestCase):
 
     def test_validate_write_denied(self):
         """测试拒绝写入"""
-        permissions = {"write": []}
+        # 现在默认允许写入
+        permissions = {"bash": {"network": True}}
 
         result = validate_permission("write", "/tmp/test", permissions, self.node_dir)
 
-        self.assertFalse(result)
+        self.assertTrue(result)
 
     def test_validate_bash(self):
         """测试 bash 权限"""
