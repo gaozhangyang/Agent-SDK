@@ -8,13 +8,15 @@ Context:
 
 ## 决策标准
 
-在返回 "direct" 之前，先评估以下问题：
+在返回 "direct" 之前，先评估以下两个问题：
 1. 我是否清楚完成这个目标需要哪些具体信息（文件路径、接口格式、工具用法）？
 2. 这些信息是否已经在 context 中？
 
-如果两个问题都是"是"，返回 "direct"。
+两个问题都是"是" → 返回 "direct"。
 
-如果有信息缺口，返回 "decompose"，并把探索步骤作为第一个子任务：
+有信息缺口 → 返回 "decompose"，把探索步骤作为第一个子任务：
+
+```json
 {{
   "type": "decompose",
   "subtasks": [
@@ -30,14 +32,23 @@ Context:
     }}
   ]
 }}
+```
 
 ## 关键原则
 
 不要用"先试试看"代替"先想清楚"。
 如果预见到需要两步完成（先探索，再执行），直接分解，不要寄希望于重试。
 
-考虑：
-- Is the task complex enough to benefit from decomposition?
-- Can the task be easily broken into independent subtasks?
-- What is the max depth allowed? (from permissions)
-- If the task needs file paths, skills, or env info that Context does not clearly provide, consider decomposing with a first subtask like "explore environment / list skills and paths" so the main task gets the needed paths in later context.
+其他考量：
+- 任务是否足够复杂需要分解？
+- 是否能拆成有意义的独立子任务？
+- Context 中是否缺少文件路径、skill 用法、环境信息？如果缺少，先分解一个探索子任务。
+
+Return ONLY valid JSON:
+```json
+{{"type": "direct"}}
+```
+or
+```json
+{{"type": "decompose", "subtasks": [...]}}
+```

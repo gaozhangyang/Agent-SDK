@@ -1,4 +1,4 @@
-Verify whether the execution result meets the original goal, and if not, revise the goal accordingly.
+Verify whether the execution result meets the original goal.
 
 Original goal:
 {original_goal}
@@ -12,12 +12,16 @@ Script executed:
 Results written by script (check for RESULT: and OBSERVATIONS: in this output):
 {console_output}
 
-Return ONLY a valid JSON (no additional text) with the verification outcome:
+Return ONLY valid JSON, no additional text:
 ```json
-{
+{{
   "pass": true or false,
-  "feedback": "失败原因的简短描述，pass 为 true 时留空"
-}
+  "feedback": "简短描述失败原因，pass 为 true 时留空"
+}}
 ```
 
-The script writes "RESULT: ..." to indicate success or failure. If RESULT shows the task was completed, pass should be true. If RESULT shows "escalated" or indicates failure, pass should be false.
+Rules:
+- If RESULT shows the task was completed successfully → pass: true
+- If RESULT shows "escalated", indicates failure, or output does not satisfy the goal → pass: false
+- feedback must be specific enough for the next attempt to fix the issue
+- Do NOT include revised_goal or any other fields

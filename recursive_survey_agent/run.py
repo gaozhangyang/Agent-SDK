@@ -166,10 +166,10 @@ def setup_goal_directory(goal: str, config: Dict[str, Any], args) -> Path:
     goal_path = goal_dir / "goal.md"
     goal_path.write_text(goal, encoding="utf-8")
 
-    # 写入 permissions.json
+    # 写入 permissions.json（路径相对于 goal_dir = goals/survey_xxx，需用 ../../ 回到项目根）
     permissions = {
-        "read": [".", "../.agent/", "../../skills/"],
-        "write": [".", "../data/", "../knowledge_base/"],
+        "read": [".", "../../.agent/", "../../skills/"],
+        "write": [".", "../../data/", "../../knowledge_base/"],
         "bash": {
             "network": True,
             "delete": False,
