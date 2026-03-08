@@ -28,26 +28,55 @@ OBSERVATIONS 面向下游依赖任务。写作时问自己：
 
 ## 输出格式硬性约束
 
-script.py 写入 results.md 时，必须严格遵守以下格式：
+script.py 是**纯执行者**，只 print 可观测的事实，不做成功/失败的语义判断。
+
+### script.py 的 print 规范
+
+在每个关键操作后埋入对应 print：
+- script.py 从外部读入的数据，必须完整 print 出来`[DATA:<input>]`块(不截断)。
+- 脚本自身构造的数据不需要打印
+
+**结构化标记规范：**
+```
+[DONE] <完成的操作描述>
+[FAILED] <失败的操作描述>
+[DATA:<label>] <<<
+<完整数据内容，不截断>
+>>>
+```
+
+**示例：**
+```python
+print(f"[DONE] 读取 AGENT.md，路径: {{agent_md_path}}，长度: {{len(agent_content)}} 字符")
+print(f"[DONE] topics 解析完成，结果条目数: {{len(topics_found)}}")
+print(f"[DATA:agent_content] <<<\n{{agent_content}}\n>>>")
+```
+
+### results.md 写入规范
+
+script.py 执行后写入 results.md，**只写 result 和 console，不写 observations**：
 
 ```
-RESULT: 一句话说明完成了什么或失败原因
+status: pending
 
-OBSERVATIONS:
-- 对后续任务有用的环境事实（文件路径、接口格式、工具行为等）
-- 每条以 "- " 开头
+--- result ---
+（做了什么，或失败原因，一句话）
+
+--- console ---
+（script.py 完整 stdout/stderr）
 ```
-
-成功和失败都必须输出这个结构，verifier 依赖它来判断 pass/fail。
 
 数据文件必须写到其他路径（如 `{{goal_dir}}/output/` 下），results.md 只写摘要。
 
 无法完成时写：
 ```
-RESULT: escalated
+status: pending
 
-OBSERVATIONS:
-- 详细描述无法完成的原因和缺少的信息
+--- result ---
+escalated: 详细描述无法完成的原因和缺少的信息
+
+--- console ---
+（script.py 完整 stdout/stderr）
 ```
 
 ## 关于 script 备份

@@ -12,7 +12,7 @@ Context:
 
 在返回 "direct" 之前，先回答以下两个问题：
 1. 完成这个目标需要哪些具体信息（文件路径、接口格式、工具用法、skill 说明）？
-2. 这些信息是否已经完整地出现在 context 中？
+2. 这些信息是否已经完整地出现在 context 中？(不能是文件的引用, 如名称、路径、宏观描述; 而是要能直接在python代码里面可用的代码context信息, 如from XXX import func; out = func(input))
 
 两个问题都是"是" → 返回 "direct"。
 任何一个是"否" → 返回 "decompose"。

@@ -28,6 +28,7 @@ MAX_VERIFY_RETRY = int(os.environ.get("MAX_VERIFY_RETRY", "2"))
 # 子任务名称工具
 # ---------------------------------------------------------------------------
 
+
 def sanitize_subtask_name(name: str) -> str:
     """
     清理 subtask 名称，确保可以作为有效目录名。
@@ -49,6 +50,7 @@ def sanitize_subtask_name(name: str) -> str:
 # ---------------------------------------------------------------------------
 # script 解析工具
 # ---------------------------------------------------------------------------
+
 
 def _strip_tool_markup(text: str) -> str:
     """去除模型误输出的 tool 标记"""
@@ -95,10 +97,11 @@ def parse_script_plan(llm_output: str) -> tuple:
 # verifier 解析工具
 # ---------------------------------------------------------------------------
 
+
 def parse_verifier_response(llm_output: str) -> dict:
     """
     解析 verifier LLM 的输出。
-    期望格式: {"pass": bool, "feedback": str, "failure_type": str}
+    期望格式: {"pass": bool, "feedback": str, "failure_type": str, "observations": str}
     failure_type: "none" | "insufficient_context" | "execution_error" | "logic_error"
     """
     import re
@@ -119,6 +122,7 @@ def parse_verifier_response(llm_output: str) -> dict:
                 "pass": result.get("pass", False),
                 "feedback": result.get("feedback", ""),
                 "failure_type": result.get("failure_type", "logic_error"),
+                "observations": result.get("observations", ""),
             }
     except json.JSONDecodeError:
         pass
@@ -133,6 +137,7 @@ def parse_verifier_response(llm_output: str) -> dict:
                     "pass": result.get("pass", False),
                     "feedback": result.get("feedback", ""),
                     "failure_type": result.get("failure_type", "logic_error"),
+                    "observations": result.get("observations", ""),
                 }
         except json.JSONDecodeError:
             pass
@@ -141,11 +146,14 @@ def parse_verifier_response(llm_output: str) -> dict:
         "pass": False,
         "feedback": f"Failed to parse verifier response: {llm_output[:200]}",
         "failure_type": "logic_error",
+        "observations": "",
     }
+
 
 # ---------------------------------------------------------------------------
 # results.md 读写工具
 # ---------------------------------------------------------------------------
+
 
 def _results_text_format(
     status: str,
@@ -223,6 +231,7 @@ def write_results_escalated(
     reason: str,
     error_ref: Optional[str] = None,
     console: Optional[str] = None,
+    observations: Optional[str] = None,
 ) -> None:
     """
     写入 escalated 状态的结果。
@@ -244,25 +253,35 @@ def write_results_escalated(
         reason_line += f"\n(error_ref: {error_ref})"
 
     with open(results_path, "w", encoding="utf-8") as f:
-        f.write(_results_text_format("escalated", reason_line, console))
+        f.write(_results_text_format("escalated", reason_line, console, observations))
 
     update_meta_status(goal_dir, "failed")
 
 
-def _merge_console_into_results(results_path: str, console: str) -> None:
-    """把控制台输出追加进已有的 results.md"""
-    if not console.strip():
+def _merge_console_into_results(
+    results_path: str, console: str, observations: Optional[str] = None
+) -> None:
+    """把控制台输出和 observations 追加进已有的 results.md"""
+    if not console.strip() and not observations:
         return
     try:
         with open(results_path, "r", encoding="utf-8") as f:
             data = parse_results_content(f.read())
+
+        # 如果传入了新的 observations，则使用新的 observations（由 verifier 生成）
+        new_observations = (
+            observations if observations else data.get("observations", "")
+        )
+
         with open(results_path, "w", encoding="utf-8") as f:
-            f.write(_results_text_format(
-                data.get("status", "completed"),
-                data.get("result", ""),
-                console,
-                data.get("observations", ""),
-            ))
+            f.write(
+                _results_text_format(
+                    data.get("status", "completed"),
+                    data.get("result", ""),
+                    console,
+                    new_observations,
+                )
+            )
     except OSError:
         pass
 
@@ -284,6 +303,7 @@ def update_meta_status(goal_dir: str, status: str) -> None:
 # ---------------------------------------------------------------------------
 # script 执行
 # ---------------------------------------------------------------------------
+
 
 def execute_script(goal_dir: str, permissions: dict, logger) -> str:
     """
@@ -341,6 +361,7 @@ def execute_script(goal_dir: str, permissions: dict, logger) -> str:
 # 核心执行：带验证循环的直接执行
 # ---------------------------------------------------------------------------
 
+
 def execute_with_verification(
     goal_dir: str, goal: str, context: str, permissions: dict, logger, depth: int = 0
 ) -> None:
@@ -354,6 +375,7 @@ def execute_with_verification(
     llm_call = primitives["llm_call"]
 
     last_script, last_feedback = "", ""
+    observations = ""  # 初始化 observations 变量
 
     for attempt in range(MAX_VERIFY_RETRY):
         # 历史块：只保留上一时刻（马尔可夫结构）
@@ -368,7 +390,8 @@ def execute_with_verification(
 
         error_hint_block = (
             f"\nError/feedback from previous attempt:\n{last_feedback}"
-            if last_feedback else ""
+            if last_feedback
+            else ""
         )
 
         code_gen_template = get_code_generator_prompt()
@@ -381,105 +404,114 @@ def execute_with_verification(
             HISTORY_BLOCK=history_block,
         )
 
+
+        script_plan_content = llm_call(
+            context=[goal, context, last_feedback, last_script],
+            prompt=prompt,
+            role="coder",
+        )
+
+        script, plan = parse_script_plan(script_plan_content)
+        if not script:
+            script = parse_script(script_plan_content)
+
+        # 写入 script.py + 带编号备份（方便调试）
+        script_path = os.path.join(goal_dir, "script.py")
+        with open(script_path, "w", encoding="utf-8") as f:
+            f.write(script)
+        backup_path = os.path.join(goal_dir, f"script_attempt_{attempt + 1}.py")
+        with open(backup_path, "w", encoding="utf-8") as f:
+            f.write(script)
+
+        logger.log_trace(
+            kind="script_generated", node=goal_dir, attempt=attempt + 1
+        )
+
+        # 执行（失败时捕获报错信息作为 console_output，不中断主程序）
         try:
-            script_plan_content = llm_call(
-                context=[goal, context, last_feedback, last_script],
-                prompt=prompt,
-                role="coder",
-            )
-
-            script, plan = parse_script_plan(script_plan_content)
-            if not script:
-                script = parse_script(script_plan_content)
-
-            # 写入 script.py + 带编号备份（方便调试）
-            script_path = os.path.join(goal_dir, "script.py")
-            with open(script_path, "w", encoding="utf-8") as f:
-                f.write(script)
-            backup_path = os.path.join(goal_dir, f"script_attempt_{attempt + 1}.py")
-            with open(backup_path, "w", encoding="utf-8") as f:
-                f.write(script)
-
-            logger.log_trace(kind="script_generated", node=goal_dir, attempt=attempt + 1)
-
-            # 执行
             console_output = execute_script(goal_dir, permissions, logger)
-
-            # 读取执行结果
-            results_path = os.path.join(goal_dir, "results.md")
-            execution_result = ""
-            if os.path.exists(results_path):
-                with open(results_path, "r", encoding="utf-8") as f:
-                    execution_result = f.read()
-            else:
-                execution_result = console_output
-
-            # 验证（pass/fail + failure_type，不修订 goal）
-            verifier_template = get_verifier_prompt()
-            verifier_prompt = verifier_template.format(
-                original_goal=goal,
-                plan=plan or "No plan provided",
-                script=script,
-                console_output=execution_result,
-            )
-
-            verifier_response = llm_call(
-                context=[goal, plan or "", script, execution_result],
-                prompt=verifier_prompt,
-                role="verifier",
-            )
-
-            verification = parse_verifier_response(verifier_response)
-
-            if verification.get("pass", False):
-                if os.path.exists(results_path):
-                    _merge_console_into_results(results_path, console_output)
-                else:
-                    write_results_completed(
-                        goal_dir, "Script completed with verification", console=console_output
-                    )
-                logger.log_trace(
-                    kind="verification_passed", node=goal_dir, attempt=attempt + 1
-                )
-                return
-
-            # 验证失败：区分失败类型
-            failure_type = verification.get("failure_type", "logic_error")
-            feedback = verification.get("feedback", "Verification failed")
-
-            logger.log_trace(
-                kind="verification_failed",
-                node=goal_dir,
-                attempt=attempt + 1,
-                failure_type=failure_type,
-                feedback=feedback,
-            )
-
-            if failure_type == "insufficient_context":
-                # 信息不足，重试无意义，直接 escalate。
-                # 父节点重跑此节点时，_read_previous_failure 会读到这个原因，
-                # decision prompt 会引导 LLM 改为 decompose。
-                reason = f"insufficient_context: {feedback}"
-                write_results_escalated(goal_dir, reason)
-                raise RuntimeError(reason)
-
-            # execution_error 或 logic_error：更新上一时刻，继续重试
-            last_feedback = feedback
-            last_script = script
-
-        except RuntimeError:
-            raise  # insufficient_context 的 escalate，直接向上传递
         except Exception as e:
-            last_feedback = str(e)
-            logger.log_trace(
-                kind="execution_error", node=goal_dir, attempt=attempt + 1, error=str(e)
-            )
+            console_output = f"Execution failed: {type(e).__name__}: {e}"
 
-    # 达到最大重试次数
-    write_results_escalated(
-        goal_dir, f"Verification failed after {MAX_VERIFY_RETRY} attempts: {last_feedback}"
-    )
-    raise RuntimeError(f"Verification failed after {MAX_VERIFY_RETRY} attempts")
+        # 读取执行结果
+        results_path = os.path.join(goal_dir, "results.md")
+        execution_result = ""
+        if os.path.exists(results_path):
+            with open(results_path, "r", encoding="utf-8") as f:
+                execution_result = f.read()
+        else:
+            execution_result = console_output
+
+        # 验证（pass/fail + failure_type，不修订 goal）
+        verifier_template = get_verifier_prompt()
+        verifier_prompt = verifier_template.format(
+            original_goal=goal,
+            plan=plan or "No plan provided",
+            script=script,
+            console_output=execution_result,
+        )
+
+        verifier_response = llm_call(
+            context=[goal, plan or "", script, execution_result],
+            prompt=verifier_prompt,
+            role="verifier",
+        )
+
+        verification = parse_verifier_response(verifier_response)
+
+        # 提取 verifier 生成的 observations
+        observations = verification.get("observations", "")
+
+        if verification.get("pass", False):
+            if os.path.exists(results_path):
+                _merge_console_into_results(
+                    results_path, console_output, observations
+                )
+            else:
+                write_results_completed(
+                    goal_dir,
+                    "Script completed with verification",
+                    console=console_output,
+                    observations=observations,
+                )
+            logger.log_trace(
+                kind="verification_passed", node=goal_dir, attempt=attempt + 1
+            )
+            break
+
+        # 验证失败：区分失败类型
+        failure_type = verification.get("failure_type", "logic_error")
+        feedback = verification.get("feedback", "Verification failed")
+
+        # logger.log_trace(
+        #     kind="verification_failed",
+        #     node=goal_dir,
+        #     attempt=attempt + 1,
+        #     failure_type=failure_type,
+        #     feedback=feedback,
+        # )
+
+        # if failure_type == "insufficient_context":
+        #     # 信息不足，重试无意义，直接 escalate。
+        #     # 父节点重跑此节点时，_read_previous_failure 会读到这个原因，
+        #     # decision prompt 会引导 LLM 改为 decompose。
+        #     reason = f"insufficient_context: {feedback}"
+        #     write_results_escalated(goal_dir, reason, observations=observations)
+        #     raise RuntimeError(reason)
+
+        # execution_error 或 logic_error：更新上一时刻，继续重试
+        last_feedback = feedback
+        last_script = script
+
+    # 子目标完成后，把本节点的 OBSERVATIONS 追加到父节点 context.md（与 execute_decompose 中行为一致）
+    if depth > 0:
+        parent_dir = os.path.dirname(goal_dir)
+        subtask_name = os.path.basename(goal_dir)
+        _append_observations_to_parent_context(parent_dir, subtask_name)
+
+
+    
+
 
 # ---------------------------------------------------------------------------
 # 分解执行
@@ -513,7 +545,8 @@ def _append_observations_to_parent_context(goal_dir: str, subtask_name: str) -> 
             existing_lines = {line.strip() for line in f if line.strip()}
 
     new_lines = [
-        line for line in observations.splitlines()
+        line
+        for line in observations.splitlines()
         if line.strip() and line.strip() not in existing_lines
     ]
     if not new_lines:
@@ -618,7 +651,9 @@ def execute_decompose(
                 with open(meta_path, "w", encoding="utf-8") as f:
                     json.dump(meta_data, f, indent=2, ensure_ascii=False)
 
-                logger.log_trace(kind="subtask_retry", node=subdir, retry=retry_count + 1)
+                logger.log_trace(
+                    kind="subtask_retry", node=subdir, retry=retry_count + 1
+                )
                 meta_agent(subdir, depth + 1, display_index=None)
                 _append_observations_to_parent_context(goal_dir, task["name"])
             else:
@@ -662,7 +697,9 @@ def merge_results(
             part += f"\n--- observations ---\n{data['observations']}\n"
         merged_parts.append(part)
 
-    content = "status: completed\n\n--- merged results ---\n\n" + "\n\n".join(merged_parts)
+    content = "status: completed\n\n--- merged results ---\n\n" + "\n\n".join(
+        merged_parts
+    )
 
     with open(os.path.join(goal_dir, "results.md"), "w", encoding="utf-8") as f:
         f.write(content)
