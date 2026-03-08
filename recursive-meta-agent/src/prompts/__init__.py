@@ -55,3 +55,8 @@ def get_decomposer_prompt() -> str:
 def get_verifier_prompt() -> str:
     """获取验证器 prompt 模板"""
     return load_prompt("verifier")
+
+
+def get_compressor_prompt() -> str:
+    """获取压缩器 prompt 模板"""
+    return load_prompt("compressor")

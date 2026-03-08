@@ -2,15 +2,46 @@
 Probe 函数
 以最小代价理解任务形状——退化为纯确定性操作，不调用 LLM。
 
-context.md 的写入规则（变更4）：
-  - 写入时机1：probe 阶段初始化（本文件）
-  - 写入时机2：execute_decompose 中每个子节点完成后追加 OBSERVATIONS（executor.py）
-  - 其他任何地方不得写入 context.md
+global context 的读取规则（变更1）：
+  - 读取时机：probe 阶段读取 global context，拼接进 prompt
+  - 写入时机：execute_with_verification 中 verifier 完成后写入 global context（executor.py）
+  - 位置：{rootGoalDir}/global_context.md
+  - 各节点本地 context.md 不再创建和维护
 """
 
 import os
 import subprocess
 from typing import Dict, Any, Optional
+
+
+def _find_root_goal_dir(goal_dir: str) -> str:
+    """
+    向上遍历找到根目标目录（包含 goal.md 的最顶层目录）
+    """
+    current = goal_dir
+    while current:
+        parent = os.path.dirname(current)
+        if not parent or parent == current:
+            # 到达文件系统根目录，返回原始目录
+            return goal_dir
+        goal_path = os.path.join(parent, "goal.md")
+        if os.path.exists(goal_path):
+            current = parent
+        else:
+            break
+    return current
+
+
+def _read_global_context(goal_dir: str) -> str:
+    """
+    读取根目标目录下的 global_context.md
+    """
+    root_goal_dir = _find_root_goal_dir(goal_dir)
+    global_context_path = os.path.join(root_goal_dir, "global_context.md")
+    if os.path.exists(global_context_path):
+        with open(global_context_path, "r", encoding="utf-8") as f:
+            return f.read()
+    return ""
 
 
 def probe(
@@ -22,12 +53,12 @@ def probe(
     permissions_dir: str = None,
 ) -> str:
     """
-    初始化当前节点的 context.md，返回 context 字符串。
+    初始化当前节点的 context，返回 context 字符串。
 
     固定读取：
     1. 目录结构快照
     2. 允许的外部目录（skills 等，来自 permissions）
-    3. 父节点 context.md（仅 depth > 0）
+    3. 根节点的 global context（所有节点的 observations 累积）
     4. 上次执行结果（retry 场景，results.md 已存在）
     5. 历史记忆（最近 5 条）
     """
@@ -42,12 +73,10 @@ def probe(
     if external:
         parts.append(f"# Allowed external directories\n{external}")
 
-    # 3. 父节点 context（子节点继承前驱信息）
-    if depth > 0:
-        parent_context_path = os.path.normpath(os.path.join(goal_dir, "..", "context.md"))
-        if os.path.exists(parent_context_path):
-            with open(parent_context_path, "r", encoding="utf-8") as f:
-                parts.append(f"# Parent context\n{f.read()}")
+    # 3. 根节点的 global context（所有节点的 observations 累积）
+    global_context = _read_global_context(goal_dir)
+    if global_context:
+        parts.append(f"# Global context\n{global_context}")
 
     # 4. 上次执行结果（retry 场景）
     results_path = os.path.join(goal_dir, "results.md")
@@ -62,11 +91,7 @@ def probe(
 
     context = "\n\n---\n\n".join(parts)
 
-    # 写入 context.md（时机1：初始化）
-    context_path = os.path.join(goal_dir, "context.md")
-    with open(context_path, "w", encoding="utf-8") as f:
-        f.write(context)
-
+    # 注意：不再写入本地 context.md，改为写入 global context
     logger.log_trace(kind="probe_completed", node=goal_dir, context_length=len(context))
     return context
 
@@ -76,7 +101,10 @@ def _get_directory_tree(goal_dir: str) -> str:
     try:
         result = subprocess.run(
             f"find {goal_dir} -maxdepth 2 -type f | head -40",
-            shell=True, capture_output=True, text=True, timeout=10,
+            shell=True,
+            capture_output=True,
+            text=True,
+            timeout=10,
         )
         return result.stdout or "No files found"
     except Exception as e:
@@ -106,7 +134,10 @@ def _get_external_directories(
         try:
             result = subprocess.run(
                 f"find {abs_path} -maxdepth 3 -type f \\( -name '*.py' -o -name '*.md' \\) | head -30",
-                shell=True, capture_output=True, text=True, timeout=10,
+                shell=True,
+                capture_output=True,
+                text=True,
+                timeout=10,
             )
             if result.stdout:
                 lines.append(f"\n## From: {rel_path}\n{result.stdout}")

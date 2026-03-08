@@ -358,6 +358,157 @@ def execute_script(goal_dir: str, permissions: dict, logger) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Global Context 写入与压缩
+# ---------------------------------------------------------------------------
+
+
+def _find_root_goal_dir(goal_dir: str) -> str:
+    """
+    向上遍历找到根目标目录（包含 goal.md 的最顶层目录）
+    """
+    current = goal_dir
+    while current:
+        parent = os.path.dirname(current)
+        if not parent or parent == current:
+            return current
+        goal_path = os.path.join(parent, "goal.md")
+        if os.path.exists(goal_path):
+            current = parent
+        else:
+            break
+    return current
+
+
+def _get_context_compression_threshold() -> int:
+    """
+    从环境变量或配置中获取压缩阈值
+    默认值为 context_budget_total 的 60%（即 120000 字符）
+    """
+    return int(os.environ.get("CONTEXT_COMPRESSION_THRESHOLD", "120000"))
+
+
+def _write_to_global_context(
+    goal_dir: str,
+    observations: str,
+    console: str,
+) -> None:
+    """
+    将节点执行结果写入根目标的 global_context.md
+    每次追加写入，不重组文档结构，保持顺序累积。
+    """
+    # 找到根目标目录
+    root_goal_dir = _find_root_goal_dir(goal_dir)
+    global_context_path = os.path.join(root_goal_dir, "global_context.md")
+
+    # 构建新条目
+    node_path = os.path.relpath(goal_dir, root_goal_dir)
+    new_entry = f"\n# From: {node_path}\n"
+
+    if observations and observations.strip():
+        new_entry += f"## observations\n{observations.strip()}\n"
+
+    if console and console.strip():
+        new_entry += f"## console\n{console.strip()}\n"
+
+    # 追加写入
+    with open(global_context_path, "a", encoding="utf-8") as f:
+        f.write(new_entry)
+
+
+def _append_observations_to_global_context(subdir: str) -> None:
+    """
+    从子节点 results.md 读取 observations 和 console，写入 global context
+    """
+    results_path = os.path.join(subdir, "results.md")
+    if not os.path.exists(results_path):
+        return
+
+    with open(results_path, "r", encoding="utf-8") as f:
+        data = parse_results_content(f.read())
+
+    observations = data.get("observations", "").strip()
+    console = data.get("console", "").strip()
+
+    _write_to_global_context(subdir, observations, console)
+
+
+def _compress_global_context(global_context: str, llm_call, logger) -> str:
+    """
+    调用 compressor LLM 压缩 global context
+    - 保留所有 observations（key facts：具体数值、路径、配置、接口格式等）
+    - console 部分优先裁剪：丢弃已被 observations 覆盖的 DATA 块
+    - 保留来源标记（# From: {path}）
+    """
+    from prompts import get_compressor_prompt
+
+    compressor_template = get_compressor_prompt()
+    prompt = compressor_template.format(global_context=global_context)
+
+    try:
+        compressed = llm_call(
+            context=[],
+            prompt=prompt,
+            role="compressor",
+        )
+        if compressed and len(compressed) < len(global_context):
+            logger.log_trace(
+                kind="context_compressed",
+                node="",
+                original_length=len(global_context),
+                compressed_length=len(compressed),
+            )
+            return compressed
+    except Exception as e:
+        logger.log_trace(kind="compression_error", node="", error=str(e))
+
+    # 压缩失败，返回原始内容
+    return global_context
+
+
+def _write_to_global_context_with_compression(
+    goal_dir: str,
+    observations: str,
+    console: str,
+    llm_call,
+    logger,
+) -> None:
+    """
+    带压缩功能的 global context 写入
+    """
+    # 找到根目标目录
+    root_goal_dir = _find_root_goal_dir(goal_dir)
+    global_context_path = os.path.join(root_goal_dir, "global_context.md")
+
+    # 获取压缩阈值
+    compression_threshold = _get_context_compression_threshold()
+
+    # 读取当前内容
+    current_content = ""
+    if os.path.exists(global_context_path):
+        with open(global_context_path, "r", encoding="utf-8") as f:
+            current_content = f.read()
+
+    # 检查是否需要压缩
+    new_entry = ""
+    if observations and observations.strip():
+        new_entry += f"## observations\n{observations.strip()}\n"
+
+    if console and console.strip():
+        new_entry += f"## console\n{console.strip()}\n"
+
+    projected_length = len(current_content) + len(new_entry)
+
+    if projected_length > compression_threshold and current_content:
+        # 需要压缩
+        current_content = _compress_global_context(current_content, llm_call, logger)
+
+    # 追加新条目
+    with open(global_context_path, "w", encoding="utf-8") as f:
+        f.write(current_content)
+        f.write(new_entry)
+
+
+# ---------------------------------------------------------------------------
 # 核心执行：带验证循环的直接执行
 # ---------------------------------------------------------------------------
 
@@ -404,7 +555,6 @@ def execute_with_verification(
             HISTORY_BLOCK=history_block,
         )
 
-
         script_plan_content = llm_call(
             context=[goal, context, last_feedback, last_script],
             prompt=prompt,
@@ -423,9 +573,7 @@ def execute_with_verification(
         with open(backup_path, "w", encoding="utf-8") as f:
             f.write(script)
 
-        logger.log_trace(
-            kind="script_generated", node=goal_dir, attempt=attempt + 1
-        )
+        logger.log_trace(kind="script_generated", node=goal_dir, attempt=attempt + 1)
 
         # 执行（失败时捕获报错信息作为 console_output，不中断主程序）
         try:
@@ -464,9 +612,7 @@ def execute_with_verification(
 
         if verification.get("pass", False):
             if os.path.exists(results_path):
-                _merge_console_into_results(
-                    results_path, console_output, observations
-                )
+                _merge_console_into_results(results_path, console_output, observations)
             else:
                 write_results_completed(
                     goal_dir,
@@ -503,57 +649,15 @@ def execute_with_verification(
         last_feedback = feedback
         last_script = script
 
-    # 子目标完成后，把本节点的 OBSERVATIONS 追加到父节点 context.md（与 execute_decompose 中行为一致）
-    if depth > 0:
-        parent_dir = os.path.dirname(goal_dir)
-        subtask_name = os.path.basename(goal_dir)
-        _append_observations_to_parent_context(parent_dir, subtask_name)
-
-
-    
+    # 子目标完成后，把本节点的 observations 和 console 写入 global context
+    _write_to_global_context(
+        goal_dir, observations, console_output if "console_output" in dir() else ""
+    )
 
 
 # ---------------------------------------------------------------------------
 # 分解执行
 # ---------------------------------------------------------------------------
-
-
-def _append_observations_to_parent_context(goal_dir: str, subtask_name: str) -> None:
-    """
-    把子节点的 OBSERVATIONS 追加到父节点的 context.md。
-    兄弟节点之间不直接通信，通过父节点 context.md 中转，实现纯父子信息流。
-    写入前逐行去重，避免冗余信息累积。
-    """
-    subdir = os.path.join(goal_dir, subtask_name)
-    results_path = os.path.join(subdir, "results.md")
-    context_path = os.path.join(goal_dir, "context.md")
-
-    if not os.path.exists(results_path):
-        return
-
-    with open(results_path, "r", encoding="utf-8") as f:
-        data = parse_results_content(f.read())
-
-    observations = data.get("observations", "").strip()
-    if not observations:
-        return
-
-    # 读取已有 context，逐行去重，避免冗余信息累积
-    existing_lines: set = set()
-    if os.path.exists(context_path):
-        with open(context_path, "r", encoding="utf-8") as f:
-            existing_lines = {line.strip() for line in f if line.strip()}
-
-    new_lines = [
-        line
-        for line in observations.splitlines()
-        if line.strip() and line.strip() not in existing_lines
-    ]
-    if not new_lines:
-        return
-
-    with open(context_path, "a", encoding="utf-8") as f:
-        f.write(f"\n\n# From: {subtask_name}\n" + "\n".join(new_lines))
 
 
 def execute_decompose(
@@ -622,8 +726,8 @@ def execute_decompose(
         for task_idx, task in enumerate(level_tasks):
             subdir = os.path.join(goal_dir, task["name"])
             meta_agent(subdir, depth + 1, display_index=task_idx + 1)
-            # 子节点完成后立即把 OBSERVATIONS 注入父节点 context.md
-            _append_observations_to_parent_context(goal_dir, task["name"])
+            # 子节点完成后把 OBSERVATIONS 写入 global context
+            _append_observations_to_global_context(subdir)
 
         # 检查失败，按需重试
         for task in level_tasks:
@@ -655,7 +759,7 @@ def execute_decompose(
                     kind="subtask_retry", node=subdir, retry=retry_count + 1
                 )
                 meta_agent(subdir, depth + 1, display_index=None)
-                _append_observations_to_parent_context(goal_dir, task["name"])
+                _append_observations_to_global_context(subdir)
             else:
                 logger.log_trace(kind="subtask_retry_exhausted", node=subdir)
                 write_results_escalated(
