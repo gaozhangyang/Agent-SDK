@@ -12,16 +12,13 @@ from typing import Dict, Any, List, Optional
 from datetime import datetime
 
 from logger import get_logger
-from primitives import make_primitives, MAX_RETRY
+from primitives import make_primitives
 from deps import validate_dependencies, get_execution_levels, ValidationError
 from prompts import get_code_generator_prompt, get_verifier_prompt
 
 
 # 子进程执行 script 时的默认超时（秒）
 SCRIPT_RUN_TIMEOUT = int(os.environ.get("SCRIPT_RUN_TIMEOUT", "600"))
-
-# 最大验证循环次数（纯容错，不用于探索）
-MAX_VERIFY_RETRY = int(os.environ.get("MAX_VERIFY_RETRY", "2"))
 
 
 # ---------------------------------------------------------------------------
@@ -101,8 +98,7 @@ def parse_script_plan(llm_output: str) -> tuple:
 def parse_verifier_response(llm_output: str) -> dict:
     """
     解析 verifier LLM 的输出。
-    期望格式: {"pass": bool, "feedback": str, "failure_type": str, "observations": str}
-    failure_type: "none" | "insufficient_context" | "execution_error" | "logic_error"
+    期望格式: {"pass": bool, "reason": str}
     """
     import re
 
@@ -120,9 +116,7 @@ def parse_verifier_response(llm_output: str) -> dict:
         if isinstance(result, dict) and "pass" in result:
             return {
                 "pass": result.get("pass", False),
-                "feedback": result.get("feedback", ""),
-                "failure_type": result.get("failure_type", "logic_error"),
-                "observations": result.get("observations", ""),
+                "reason": result.get("reason", ""),
             }
     except json.JSONDecodeError:
         pass
@@ -135,169 +129,15 @@ def parse_verifier_response(llm_output: str) -> dict:
             if isinstance(result, dict) and "pass" in result:
                 return {
                     "pass": result.get("pass", False),
-                    "feedback": result.get("feedback", ""),
-                    "failure_type": result.get("failure_type", "logic_error"),
-                    "observations": result.get("observations", ""),
+                    "reason": result.get("reason", ""),
                 }
         except json.JSONDecodeError:
             pass
 
     return {
         "pass": False,
-        "feedback": f"Failed to parse verifier response: {llm_output[:200]}",
-        "failure_type": "logic_error",
-        "observations": "",
+        "reason": f"Failed to parse verifier response: {llm_output[:200]}",
     }
-
-
-# ---------------------------------------------------------------------------
-# results.md 读写工具
-# ---------------------------------------------------------------------------
-
-
-def _results_text_format(
-    status: str,
-    result_or_reason: str,
-    console: Optional[str] = None,
-    observations: Optional[str] = None,
-) -> str:
-    """生成控制台风格 results.md：首行 status，其余为可读区块"""
-    lines = [f"status: {status}", ""]
-    if result_or_reason:
-        lines += ["--- result ---", result_or_reason.strip(), ""]
-    if observations and observations.strip():
-        lines += ["--- observations ---", observations.strip(), ""]
-    if console and console.strip():
-        lines += ["--- console ---", console.strip()]
-    return "\n".join(lines)
-
-
-def parse_results_content(content: str) -> Dict[str, Any]:
-    """
-    解析 results.md，兼容新（首行 status + 区块）与旧（JSON）格式。
-    """
-    content = content.strip()
-
-    # 旧格式：JSON
-    if content.startswith("{"):
-        try:
-            return json.loads(content)
-        except json.JSONDecodeError:
-            pass
-
-    lines = content.split("\n")
-    out: Dict[str, Any] = {}
-
-    if lines and lines[0].startswith("status:"):
-        out["status"] = lines[0].split(":", 1)[1].strip()
-
-    current_section = None
-    for line in lines[1:]:
-        stripped = line.strip()
-        if stripped == "--- result ---":
-            current_section = "result"
-        elif stripped == "--- console ---":
-            current_section = "console"
-        elif stripped == "--- observations ---":
-            current_section = "observations"
-        elif stripped in ("--- merged results ---",):
-            current_section = None  # merged 区块内容不单独解析
-        elif current_section:
-            out[current_section] = out.get(current_section, "") + line + "\n"
-
-    for key in ("result", "console", "observations"):
-        if key in out:
-            out[key] = out[key].strip()
-
-    return out
-
-
-def write_results_completed(
-    goal_dir: str,
-    result: str,
-    console: Optional[str] = None,
-    observations: Optional[str] = None,
-) -> None:
-    """写入 completed 状态的结果"""
-    results_path = os.path.join(goal_dir, "results.md")
-    if os.path.exists(results_path):
-        os.remove(results_path)
-    with open(results_path, "w", encoding="utf-8") as f:
-        f.write(_results_text_format("completed", result, console, observations))
-
-
-def write_results_escalated(
-    goal_dir: str,
-    reason: str,
-    error_ref: Optional[str] = None,
-    console: Optional[str] = None,
-    observations: Optional[str] = None,
-) -> None:
-    """
-    写入 escalated 状态的结果。
-    如果之前已是 completed，不覆盖。
-    """
-    results_path = os.path.join(goal_dir, "results.md")
-
-    if os.path.exists(results_path):
-        try:
-            with open(results_path, "r", encoding="utf-8") as f:
-                data = parse_results_content(f.read())
-            if data.get("status") == "completed":
-                return
-        except Exception:
-            pass
-
-    reason_line = reason
-    if error_ref:
-        reason_line += f"\n(error_ref: {error_ref})"
-
-    with open(results_path, "w", encoding="utf-8") as f:
-        f.write(_results_text_format("escalated", reason_line, console, observations))
-
-    update_meta_status(goal_dir, "failed")
-
-
-def _merge_console_into_results(
-    results_path: str, console: str, observations: Optional[str] = None
-) -> None:
-    """把控制台输出和 observations 追加进已有的 results.md"""
-    if not console.strip() and not observations:
-        return
-    try:
-        with open(results_path, "r", encoding="utf-8") as f:
-            data = parse_results_content(f.read())
-
-        # 如果传入了新的 observations，则使用新的 observations（由 verifier 生成）
-        new_observations = (
-            observations if observations else data.get("observations", "")
-        )
-
-        with open(results_path, "w", encoding="utf-8") as f:
-            f.write(
-                _results_text_format(
-                    data.get("status", "completed"),
-                    data.get("result", ""),
-                    console,
-                    new_observations,
-                )
-            )
-    except OSError:
-        pass
-
-
-def update_meta_status(goal_dir: str, status: str) -> None:
-    """更新 meta.json 的状态"""
-    meta_path = os.path.join(goal_dir, "meta.json")
-    if not os.path.exists(meta_path):
-        return
-    with open(meta_path, "r", encoding="utf-8") as f:
-        meta = json.load(f)
-    meta["status"] = status
-    if status == "completed":
-        meta["completed_at"] = datetime.now().isoformat()
-    with open(meta_path, "w", encoding="utf-8") as f:
-        json.dump(meta, f, indent=2, ensure_ascii=False)
 
 
 # ---------------------------------------------------------------------------
@@ -336,21 +176,17 @@ def execute_script(goal_dir: str, permissions: dict, logger) -> str:
             env=os.environ.copy(),
         )
     except subprocess.TimeoutExpired as e:
-        out = (e.stdout or "") + (e.stderr or "")
+        out = (e.stdout or b"").decode("utf-8", errors="replace") + (
+            e.stderr or b""
+        ).decode("utf-8", errors="replace")
         err_msg = f"Script timed out after {SCRIPT_RUN_TIMEOUT}s"
-        write_results_escalated(goal_dir, err_msg, console=out)
         raise RuntimeError(err_msg) from e
 
     console_output = result.stdout + ("\n" + result.stderr if result.stderr else "")
 
     if result.returncode != 0:
-        write_results_escalated(
-            goal_dir,
-            f"Exit code {result.returncode}",
-            console=console_output,
-        )
         raise RuntimeError(
-            f"Script exited with code {result.returncode}. See results.md (console) for details."
+            f"Script exited with code {result.returncode}. Console output: {console_output[:500]}"
         )
 
     logger.log_trace(kind="script_executed", node=goal_dir)
@@ -358,27 +194,27 @@ def execute_script(goal_dir: str, permissions: dict, logger) -> str:
 
 
 # ---------------------------------------------------------------------------
-# 核心执行：带验证循环的直接执行
+# 核心执行：直接执行模式
 # ---------------------------------------------------------------------------
 
 
 def execute_with_verification(
     goal_dir: str, goal: str, context: str, permissions: dict, logger, depth: int = 0
-) -> None:
+) -> str:
     """
-    直接执行模式，带容错验证循环（马尔可夫结构）。
-
-    循环的唯一用途是处理偶发错误（execution_error、logic_error）。
-    insufficient_context 直接 escalate，不重试——父节点重跑时会改为 decompose。
+    直接执行模式。
+    - 保留一次重试机会处理 execution_error
+    - 两次都失败，返回失败原因作为 observation
+    - 返回最终的 observation 字符串
     """
     primitives = make_primitives(goal_dir, permissions, logger)
     llm_call = primitives["llm_call"]
 
-    last_script, last_feedback = "", ""
-    observations = ""  # 初始化 observations 变量
+    last_script = ""
+    last_feedback = ""
 
-    for attempt in range(MAX_VERIFY_RETRY):
-        # 历史块：只保留上一时刻（马尔可夫结构）
+    for attempt in range(2):  # 最多两次尝试
+        # 历史块：只保留上一时刻
         history_block = ""
         if last_script:
             history_block = (
@@ -404,7 +240,6 @@ def execute_with_verification(
             HISTORY_BLOCK=history_block,
         )
 
-
         script_plan_content = llm_call(
             context=[goal, context, last_feedback, last_script],
             prompt=prompt,
@@ -423,137 +258,103 @@ def execute_with_verification(
         with open(backup_path, "w", encoding="utf-8") as f:
             f.write(script)
 
-        logger.log_trace(
-            kind="script_generated", node=goal_dir, attempt=attempt + 1
-        )
+        logger.log_trace(kind="script_generated", node=goal_dir, attempt=attempt + 1)
 
-        # 执行（失败时捕获报错信息作为 console_output，不中断主程序）
+        # 执行 script
+        observation = ""
         try:
             console_output = execute_script(goal_dir, permissions, logger)
+            # script 的完整 stdout 即为 observation
+            observation = console_output
         except Exception as e:
-            console_output = f"Execution failed: {type(e).__name__}: {e}"
+            # execution_error：失败原因本身就是 observation
+            observation = f"Execution failed: {type(e).__name__}: {e}"
 
-        # 读取执行结果
-        results_path = os.path.join(goal_dir, "results.md")
-        execution_result = ""
-        if os.path.exists(results_path):
-            with open(results_path, "r", encoding="utf-8") as f:
-                execution_result = f.read()
-        else:
-            execution_result = console_output
-
-        # 验证（pass/fail + failure_type，不修订 goal）
+        # 验证（pass/fail）
         verifier_template = get_verifier_prompt()
         verifier_prompt = verifier_template.format(
             original_goal=goal,
             plan=plan or "No plan provided",
             script=script,
-            console_output=execution_result,
+            console_output=observation,
         )
 
         verifier_response = llm_call(
-            context=[goal, plan or "", script, execution_result],
+            context=[goal, plan or "", script, observation],
             prompt=verifier_prompt,
             role="verifier",
         )
 
         verification = parse_verifier_response(verifier_response)
 
-        # 提取 verifier 生成的 observations
-        observations = verification.get("observations", "")
-
         if verification.get("pass", False):
-            if os.path.exists(results_path):
-                _merge_console_into_results(
-                    results_path, console_output, observations
-                )
-            else:
-                write_results_completed(
-                    goal_dir,
-                    "Script completed with verification",
-                    console=console_output,
-                    observations=observations,
-                )
             logger.log_trace(
                 kind="verification_passed", node=goal_dir, attempt=attempt + 1
             )
-            break
+            # 返回 observation（供 meta_agent 末尾统一写入）
+            return observation
 
-        # 验证失败：区分失败类型
-        failure_type = verification.get("failure_type", "logic_error")
-        feedback = verification.get("feedback", "Verification failed")
+        # 验证失败
+        feedback = verification.get("reason", "Verification failed")
 
-        # logger.log_trace(
-        #     kind="verification_failed",
-        #     node=goal_dir,
-        #     attempt=attempt + 1,
-        #     failure_type=failure_type,
-        #     feedback=feedback,
-        # )
+        # 第一次失败，准备第二次尝试
+        if attempt == 0:
+            last_feedback = feedback
+            last_script = script
 
-        # if failure_type == "insufficient_context":
-        #     # 信息不足，重试无意义，直接 escalate。
-        #     # 父节点重跑此节点时，_read_previous_failure 会读到这个原因，
-        #     # decision prompt 会引导 LLM 改为 decompose。
-        #     reason = f"insufficient_context: {feedback}"
-        #     write_results_escalated(goal_dir, reason, observations=observations)
-        #     raise RuntimeError(reason)
-
-        # execution_error 或 logic_error：更新上一时刻，继续重试
-        last_feedback = feedback
-        last_script = script
-
-    # 子目标完成后，把本节点的 OBSERVATIONS 追加到父节点 context.md（与 execute_decompose 中行为一致）
-    if depth > 0:
-        parent_dir = os.path.dirname(goal_dir)
-        subtask_name = os.path.basename(goal_dir)
-        _append_observations_to_parent_context(parent_dir, subtask_name)
+    # 两次都失败：返回失败原因作为 observation
+    return last_feedback
 
 
-    
+def write_results(goal_dir: str, observation: str) -> None:
+    """根节点写入 results.md"""
+    results_path = os.path.join(goal_dir, "results.md")
+    with open(results_path, "w", encoding="utf-8") as f:
+        f.write(f"# Result\n\n{observation}")
+
+
+def append_to_parent_context(
+    parent_dir: str, subtask_name: str, observation: str
+) -> None:
+    """
+    把子节点的 observation 追加到父节点的 context.md。
+    按子任务名称加标题追加，保持信息完整性。
+    写入前逐行去重，避免冗余信息累积。
+    """
+    context_path = os.path.join(parent_dir, "context.md")
+
+    if not observation:
+        return
+
+    # 读取已有 context，逐行去重
+    existing_lines: set = set()
+    if os.path.exists(context_path):
+        with open(context_path, "r", encoding="utf-8") as f:
+            for line in f:
+                stripped = line.strip()
+                if stripped:
+                    existing_lines.add(stripped)
+
+    # 构建新内容，去除已存在的行
+    new_lines = []
+    for line in observation.splitlines():
+        stripped = line.strip()
+        if stripped and stripped not in existing_lines:
+            new_lines.append(line)
+            existing_lines.add(stripped)  # 防止同一段落内重复
+
+    if not new_lines:
+        return
+
+    with open(context_path, "a", encoding="utf-8") as f:
+        f.write(f"\n\n# From: {subtask_name}\n")
+        for line in new_lines:
+            f.write(line + "\n")
 
 
 # ---------------------------------------------------------------------------
 # 分解执行
 # ---------------------------------------------------------------------------
-
-
-def _append_observations_to_parent_context(goal_dir: str, subtask_name: str) -> None:
-    """
-    把子节点的 OBSERVATIONS 追加到父节点的 context.md。
-    兄弟节点之间不直接通信，通过父节点 context.md 中转，实现纯父子信息流。
-    写入前逐行去重，避免冗余信息累积。
-    """
-    subdir = os.path.join(goal_dir, subtask_name)
-    results_path = os.path.join(subdir, "results.md")
-    context_path = os.path.join(goal_dir, "context.md")
-
-    if not os.path.exists(results_path):
-        return
-
-    with open(results_path, "r", encoding="utf-8") as f:
-        data = parse_results_content(f.read())
-
-    observations = data.get("observations", "").strip()
-    if not observations:
-        return
-
-    # 读取已有 context，逐行去重，避免冗余信息累积
-    existing_lines: set = set()
-    if os.path.exists(context_path):
-        with open(context_path, "r", encoding="utf-8") as f:
-            existing_lines = {line.strip() for line in f if line.strip()}
-
-    new_lines = [
-        line
-        for line in observations.splitlines()
-        if line.strip() and line.strip() not in existing_lines
-    ]
-    if not new_lines:
-        return
-
-    with open(context_path, "a", encoding="utf-8") as f:
-        f.write(f"\n\n# From: {subtask_name}\n" + "\n".join(new_lines))
 
 
 def execute_decompose(
@@ -566,11 +367,9 @@ def execute_decompose(
 ) -> None:
     """
     分解执行模式：
-    1. 创建子节点目录（带数字前缀），写 goal.md 和 meta.json
+    1. 创建子节点目录（带数字前缀），写 goal.md
     2. 拓扑排序，分层串行执行
-    3. 每个子节点完成后，把 OBSERVATIONS 追加进父节点 context.md（父子信息流）
-    4. 子节点失败时重试（最多 MAX_RETRY 次）
-    5. 全部完成后 merge_results 合并子节点结果
+    3. 每个子节点完成后，立即把 observation 追加到父节点 context.md
     """
     from agent import meta_agent
 
@@ -599,110 +398,12 @@ def execute_decompose(
         with open(os.path.join(subdir, "goal.md"), "w", encoding="utf-8") as f:
             f.write(subtask["description"])
 
-        # decomposition_id 基于子节点自身 description 的 hash，粒度为单个子节点
-        subtask_hash = hashlib.md5(subtask["description"].encode()).hexdigest()
-        meta = {
-            "goal_id": str(__import__("uuid").uuid4()),
-            "parent_goal_id": None,
-            "depth": depth + 1,
-            "decomposition_id": subtask_hash,
-            "status": "not_started",
-            "retry_count": 0,
-            "context_truncated": False,
-            "created_at": datetime.now().isoformat(),
-            "completed_at": None,
-        }
-        with open(os.path.join(subdir, "meta.json"), "w", encoding="utf-8") as f:
-            json.dump(meta, f, indent=2, ensure_ascii=False)
-
     # 按拓扑序逐层执行
     levels = get_execution_levels(validated_tasks)
 
     for level_tasks in levels:
         for task_idx, task in enumerate(level_tasks):
             subdir = os.path.join(goal_dir, task["name"])
+            # 子任务执行后，其 observation 会在 meta_agent 末尾写入父节点 context.md
+            # 无需在此处额外调用 append_to_parent_context
             meta_agent(subdir, depth + 1, display_index=task_idx + 1)
-            # 子节点完成后立即把 OBSERVATIONS 注入父节点 context.md
-            _append_observations_to_parent_context(goal_dir, task["name"])
-
-        # 检查失败，按需重试
-        for task in level_tasks:
-            subdir = os.path.join(goal_dir, task["name"])
-            results_path = os.path.join(subdir, "results.md")
-
-            if not os.path.exists(results_path):
-                continue
-
-            with open(results_path, "r", encoding="utf-8") as f:
-                status = parse_results_content(f.read()).get("status")
-
-            if status != "escalated":
-                continue
-
-            meta_path = os.path.join(subdir, "meta.json")
-            retry_count = 0
-            if os.path.exists(meta_path):
-                with open(meta_path, "r", encoding="utf-8") as f:
-                    meta_data = json.load(f)
-                retry_count = meta_data.get("retry_count", 0)
-
-            if retry_count < MAX_RETRY:
-                meta_data["retry_count"] = retry_count + 1
-                with open(meta_path, "w", encoding="utf-8") as f:
-                    json.dump(meta_data, f, indent=2, ensure_ascii=False)
-
-                logger.log_trace(
-                    kind="subtask_retry", node=subdir, retry=retry_count + 1
-                )
-                meta_agent(subdir, depth + 1, display_index=None)
-                _append_observations_to_parent_context(goal_dir, task["name"])
-            else:
-                logger.log_trace(kind="subtask_retry_exhausted", node=subdir)
-                write_results_escalated(
-                    goal_dir,
-                    f"Subtask {task['name']} failed after {MAX_RETRY} retries",
-                )
-                return
-
-    merge_results(goal_dir, validated_tasks, goal, logger)
-
-
-def merge_results(
-    goal_dir: str, subtasks: List[Dict[str, Any]], goal: str, logger
-) -> None:
-    """
-    直接合并子节点的 result + observations，不调用 LLM，不向上传递 console。
-    """
-    merged_parts = []
-    has_failure = False
-
-    for subtask in subtasks:
-        subdir = os.path.join(goal_dir, subtask["name"])
-        results_path = os.path.join(subdir, "results.md")
-
-        if not os.path.exists(results_path):
-            continue
-
-        with open(results_path, "r", encoding="utf-8") as f:
-            data = parse_results_content(f.read())
-
-        status = data.get("status", "unknown")
-        if status in ("escalated", "failed"):
-            has_failure = True
-
-        part = f"## Subtask: {subtask['name']}\nStatus: {status}\n"
-        if data.get("result"):
-            part += f"\n--- result ---\n{data['result']}\n"
-        if data.get("observations"):
-            part += f"\n--- observations ---\n{data['observations']}\n"
-        merged_parts.append(part)
-
-    content = "status: completed\n\n--- merged results ---\n\n" + "\n\n".join(
-        merged_parts
-    )
-
-    with open(os.path.join(goal_dir, "results.md"), "w", encoding="utf-8") as f:
-        f.write(content)
-
-    update_meta_status(goal_dir, "failed" if has_failure else "completed")
-    logger.log_trace(kind="results_merged", node=goal_dir, subtask_count=len(subtasks))

@@ -17,9 +17,6 @@ def main():
     parser.add_argument(
         "--goal-dir", type=str, required=True, help="Directory containing goal.md"
     )
-    parser.add_argument(
-        "--recover", action="store_true", help="Recover from previous failure"
-    )
 
     args = parser.parse_args()
 
@@ -36,10 +33,9 @@ def main():
         sys.exit(1)
 
     print(f"Starting meta-agent for: {goal_dir}")
-    print(f"Mode: {'Recover' if args.recover else 'Normal'}")
 
     try:
-        run_agent(goal_dir, recover_mode=args.recover)
+        run_agent(goal_dir)
         print("Meta-agent completed successfully!")
     except Exception as e:
         print(f"Error: {str(e)}")

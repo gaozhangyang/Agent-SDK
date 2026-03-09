@@ -127,7 +127,6 @@ python run.py
 | `--end-date`       | 结束日期 (YYYYMMDD) | `--end-date 20260303`                 |
 | `--research-query` | 研究关键词           | `--research-query "video generation"` |
 | `--debug`          | 启用调试模式          | `--debug`                             |
-| `--recover`        | 从之前的运行恢复        | `--recover`                           |
 
 
 ### 配置修改
@@ -155,7 +154,6 @@ python run.py
 | 阈值项                     | 说明             | 默认值    |
 | ----------------------- | -------------- | ------ |
 | max_depth               | 最大递归深度         | 4      |
-| max_retry               | 最大重试次数         | 3      |
 | maxOutputLength         | 输出最大长度         | 102400 |
 | context_budget_total    | 上下文总 token 预算  | 200000 |
 | context_budget_reserved | 保留给输出的 token 数 | 4000   |
@@ -207,6 +205,8 @@ python run.py
 
 > **Bug 修复**：已修复父节点（goal）在 decompose 模式下不创建 script.py 的问题。在 decompose 模式下，父节点现在也会创建 script.py 来执行"聚合子节点结果"的操作，保持与 direct 模式的一致性。
 
+> **优化**：已优化 context 去重。随着子节点深度增加，context.md 中会累积大量冗余内容（特别是 "Allowed external directories" 部分）。现在 probe 读取父节点 context 时会自动去除公共部分，追加 observation 时逐行去重，避免深层节点 context 膨胀。
+
 ### 四个原语
 
 
@@ -222,8 +222,9 @@ python run.py
 
 1. **目录树即任务树** - 任务结构、执行状态、中间结果全部体现在文件系统上
 2. **Probe-first** - 第一个动作永远是以最小代价理解任务形状
-3. **results.md 是节点类型签名** - 父节点只通过读取子节点的 results.md 消费结果
-4. **LLMCall 是唯一随机性入口** - 其余一切保持确定性
+3. **context.md 是唯一信息载体** - 子节点完成后写入父节点 context.md，供后续兄弟任务订阅
+4. **根节点例外** - 根节点保留 results.md 作为最终输出，供用户查看
+5. **LLMCall 是唯一随机性入口** - 其余一切保持确定性
 
 ## 测试
 
@@ -245,9 +246,9 @@ python -m pytest tests/test_structure.py -v
 1. 使用前需确保 `recursive-meta-agent` 目录存在（包含 src/agent.py）
 2. 需要配置有效的 LLM API Key（或通过环境变量设置）
 3. **LLM 配置**：确保使用 MiniMax API 而非 OpenAI API
-  - 默认配置已在 `.agent/AGENT.md` 中设置
-  - 环境变量会覆盖配置文件中的设置
-  - 如遇 `401 Unauthorized` 错误，检查 `LLM_BASE_URL` 是否指向正确的 API 地址
+   - 默认配置已在 `.agent/AGENT.md` 中设置
+   - 环境变量会覆盖配置文件中的设置
+   - 如遇 `401 Unauthorized` 错误，检查 `LLM_BASE_URL` 是否指向正确的 API 地址
 4. arXiv API 有速率限制，建议每次请求间隔 3 秒以上
 5. PDF 下载会占用较多存储空间，注意清理
 6. 由于使用直接函数调用，可以直接在 IDE 中对 recursive-meta-agent 进行调试

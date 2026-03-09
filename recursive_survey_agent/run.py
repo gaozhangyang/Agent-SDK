@@ -117,11 +117,6 @@ def parse_args(argv=None):
         action="store_true",
         help="启用调试模式",
     )
-    parser.add_argument(
-        "--recover",
-        action="store_true",
-        help="从之前的运行恢复",
-    )
     return parser.parse_args(argv)
 
 
@@ -236,7 +231,7 @@ def build_context_content(config: Dict[str, Any], args) -> str:
     return content
 
 
-def run_recursive_meta_agent(goal_dir: Path, recover: bool = False) -> Dict[str, Any]:
+def run_recursive_meta_agent(goal_dir: Path) -> Dict[str, Any]:
     """
     调用 recursive-meta-agent 执行任务。
 
@@ -296,13 +291,12 @@ def run_recursive_meta_agent(goal_dir: Path, recover: bool = False) -> Dict[str,
     print(f"{'=' * 60}")
     print(f"Goal Directory: {goal_dir}")
     print(f"LLM: {os.environ.get('LLM_MODEL')} @ {os.environ.get('LLM_BASE_URL')}")
-    print(f"Recover: {recover}")
     print(f"{'=' * 60}\n")
 
     try:
         # 直接调用 run_agent 函数
         goal_dir_str = str(goal_dir)
-        meta_agent_run(goal_dir_str, recover_mode=recover)
+        meta_agent_run(goal_dir_str)
 
         # 检查结果
         results_path = goal_dir / "results.md"
@@ -363,7 +357,7 @@ def main():
     goal_dir = setup_goal_directory(goal, config, args)
 
     # 执行 recursive-meta-agent
-    result = run_recursive_meta_agent(goal_dir, recover=args.recover)
+    result = run_recursive_meta_agent(goal_dir)
 
     # 输出结果
     print(f"\n{'=' * 60}")

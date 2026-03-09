@@ -6,8 +6,6 @@ Goal:
 Context:
 {context}
 
-{previous_failure}
-
 ## 决策标准
 
 在返回 "direct" 之前，先回答以下两个问题：
@@ -47,9 +45,6 @@ explore 子任务的 description 必须明确说明：
 
 不要用"先试试看"代替"先想清楚"。
 如果预见到需要两步完成（先探索，再执行），直接分解，不要寄希望于重试。
-
-如果 previous_failure 显示上次因 insufficient_context 失败，必须返回 decompose，
-把缺失的信息作为 explore 子任务的目标。
 
 ## 其他分解考量
 
