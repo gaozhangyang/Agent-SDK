@@ -47,11 +47,6 @@ def get_decision_prompt() -> str:
     return load_prompt("decision")
 
 
-def get_decomposer_prompt() -> str:
-    """获取任务分解 prompt 模板"""
-    return load_prompt("decomposer")
-
-
-def get_verifier_prompt() -> str:
-    """获取验证器 prompt 模板"""
-    return load_prompt("verifier")
+def get_observer_prompt() -> str:
+    """获取观察器 prompt 模板"""
+    return load_prompt("observer")

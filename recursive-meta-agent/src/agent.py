@@ -18,13 +18,15 @@ from executor import (
     append_to_parent_context,
 )
 from deps import validate_dependencies, ValidationError
-from prompts import get_decision_prompt, get_decomposer_prompt
+from prompts import get_decision_prompt
 
 MAX_DEPTH = int(os.environ.get("MAX_DEPTH", "4"))
 
 
 def meta_agent(
-    goal_dir: str, depth: int = 0, display_index: Optional[int] = None
+    goal_dir: str,
+    depth: int = 0,
+    display_index: Optional[int] = None,
 ) -> None:
     """
     输入：一个包含 goal.md 的目录
@@ -52,34 +54,29 @@ def meta_agent(
 
     permissions, permissions_dir = load_permissions(goal_dir)
 
-    seq = logger.log_trace(kind="node_start", node=goal_dir, depth=depth)
-    logger.log_terminal(seq, goal_dir, "📍", f"{display_label} 开始执行")
-
     context = ""
     observation = ""  # 初始化 observation
     direct_info = ""  # 初始化 direct_info
     indirect_files = []  # 初始化 indirect_files
     decision_type = "direct"  # 初始化 decision_type
 
-    # 深度限制 → 强制直接执行
-    if depth >= permissions.get("max_depth", MAX_DEPTH):
-        logger.log_trace(
-            kind="depth_limit",
-            node=goal_dir,
-            depth=depth,
-            max_depth=permissions.get("max_depth", MAX_DEPTH),
+    # Probe：确定性操作，理解任务形状（在深度判断之前执行，确保 context 构建）
+    try:
+        context = probe(
+            goal_dir, goal, permissions, logger, depth, permissions_dir
         )
+    except Exception as e:
+        context = ""
+
+    # 深度限制 → 强制直接执行（只影响 planner 决策，不影响 context 构建）
+    subtasks = []  # 初始化 subtasks
+    if depth >= permissions.get("max_depth", MAX_DEPTH):
         decision_type = "direct"
     else:
-        # Probe：确定性操作，理解任务形状
-        try:
-            context = probe(goal_dir, goal, permissions, logger, depth, permissions_dir)
-        except Exception as e:
-            logger.log_trace(kind="probe_error", node=goal_dir, error=str(e))
-            context = ""
-
         # 决策：direct or decompose
-        decision_type = _make_decision(context, goal, permissions, logger, goal_dir)
+        decision_result = _make_decision(context, goal, permissions, logger, goal_dir)
+        decision_type = decision_result["type"]
+        subtasks = decision_result.get("subtasks", [])
 
     try:
         if decision_type == "direct":
@@ -92,11 +89,9 @@ def meta_agent(
             direct_info = result.get("direct_info", "")
             indirect_files = result.get("indirect_files", [])
         else:
-            # 分解模式
-            subtasks = _get_subtasks(context, goal, permissions, logger, goal_dir)
+            # 分解模式：使用 decision 返回的 subtasks
             if not subtasks:
                 # 无法分解，回退到直接执行
-                logger.log_trace(kind="decompose_fallback", node=goal_dir)
                 result = execute_with_verification(
                     goal_dir, goal, context, permissions, logger, depth
                 )
@@ -104,7 +99,7 @@ def meta_agent(
                 direct_info = result.get("direct_info", "")
                 indirect_files = result.get("indirect_files", [])
             else:
-                # 分解执行：每个子任务完成后，其 verifier 结果（direct_info + indirect_files）
+                # 分解执行：每个子任务完成后，其 observer 结果（direct_info + indirect_files）
                 # 会在子节点的 meta_agent 末尾写入父节点 context.md
                 # 父节点这边不需要额外处理
                 execute_decompose(goal_dir, goal, subtasks, depth, permissions, logger)
@@ -113,12 +108,7 @@ def meta_agent(
                 direct_info = ""
                 indirect_files = []
 
-        logger.log_trace(kind="node_completed", node=goal_dir)
-        logger.log_terminal(seq, goal_dir, "📍", f"{display_label} 完成")
-
     except Exception as e:
-        logger.log_trace(kind="node_failed", node=goal_dir, error=str(e))
-        logger.log_terminal(seq, goal_dir, "⚠️", f"{display_label} 失败 → {str(e)[:50]}")
         # 失败时，失败原因本身就是 observation
         observation = f"Failed: {str(e)}"
         direct_info = f"Failed: {str(e)}"
@@ -162,8 +152,8 @@ def _make_decision(
     permissions: dict,
     logger,
     node_dir: str,
-) -> str:
-    """LLM 决策：direct 还是 decompose。"""
+) -> dict:
+    """LLM 决策：direct 还是 decompose。返回 {"type": "direct"|"decompose", "subtasks": list}"""
     from primitives import make_primitives
 
     primitives = make_primitives(node_dir, permissions, logger)
@@ -177,110 +167,55 @@ def _make_decision(
 
     try:
         result = llm_call(context=context, prompt=prompt, role="planner")
-        decision = _parse_json(result)
+        decision = parse_json_from_llm(result, dict)
         if decision:
-            return decision.get("type", "direct")
+            decision_type = decision.get("type", "direct")
+            subtasks = decision.get("subtasks", [])
+            return {"type": decision_type, "subtasks": subtasks}
     except Exception as e:
-        logger.log_trace(kind="decision_error", node=node_dir, error=str(e))
-
-    return "direct"
-
-
-def _get_subtasks(
-    context: str, goal: str, permissions: dict, logger, node_dir: str
-) -> list:
-    """获取子任务列表，最多重试 3 次（依赖校验失败时重新生成）"""
-    import re
-    from primitives import make_primitives
-
-    def _sanitize(name: str) -> str:
-        name = str(name).strip().replace(" ", "_")
-        name = re.sub(r"[^a-zA-Z0-9_\-]", "", name)
-        name = re.sub(r"^[_\-]+|[_\-]+$", "", name)
-        return name[:64] if name else ""
-
-    primitives = make_primitives(node_dir, permissions, logger)
-    llm_call = primitives["llm_call"]
-
-    decomp_template = get_decomposer_prompt()
-    dependency_error = ""
-
-    for attempt in range(3):
-        prompt = decomp_template.format(
-            goal=goal, context=context, dependency_error=dependency_error
-        )
-        try:
-            result = llm_call(context=context, prompt=prompt, role="planner")
-            subtasks = _parse_subtasks(result)
-
-            if not subtasks:
-                continue
-
-            # 清理名称
-            for subtask in subtasks:
-                original = subtask.get("name", "")
-                clean = _sanitize(original)
-                subtask["name"] = clean or f"subtask_{attempt}_{hash(original) % 10000}"
-                if "depends_on" in subtask:
-                    subtask["depends_on"] = [
-                        d for dep in subtask["depends_on"] if (d := _sanitize(dep))
-                    ]
-
-            # 依赖校验
-            try:
-                return validate_dependencies(subtasks)
-            except ValidationError as e:
-                dependency_error = (
-                    f"\n\nPrevious dependency validation failed: {e}\nPlease fix."
-                )
-                logger.log_trace(
-                    kind="subtasks_retry",
-                    node=node_dir,
-                    attempt=attempt + 1,
-                    error=str(e),
-                )
-
-        except Exception as e:
-            logger.log_trace(kind="subtasks_error", node=node_dir, error=str(e))
-
-    return []
-
-
-def _parse_json(text: str) -> Optional[Dict[str, Any]]:
-    """尝试从 LLM 输出中解析 JSON 对象"""
-    import re
-
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
         pass
-    m = re.search(r"\{[\s\S]*\}", text)
-    if m:
-        try:
-            return json.loads(m.group())
-        except json.JSONDecodeError:
-            pass
-    return None
+
+    return {"type": "direct", "subtasks": []}
 
 
-def _parse_subtasks(text: str) -> Optional[list]:
-    """尝试从 LLM 输出中解析子任务列表"""
+def parse_json_from_llm(text: str, expected_type: type) -> Optional[Any]:
+    """
+    从 LLM 输出中解析 JSON。
+    expected_type: dict 或 list，控制返回类型
+    """
     import re
 
     try:
         result = json.loads(text)
-        if isinstance(result, list):
-            return result
-        if isinstance(result, dict) and "subtasks" in result:
-            return result["subtasks"]
+        if expected_type == dict:
+            if isinstance(result, dict):
+                return result
+        elif expected_type == list:
+            if isinstance(result, list):
+                return result
+            if isinstance(result, dict) and "subtasks" in result:
+                return result["subtasks"]
     except json.JSONDecodeError:
         pass
-    m = re.search(r"\[[\s\S]*\]", text)
+
+    # 使用正则提取
+    if expected_type == dict:
+        pattern = r"\{[\s\S]*\}"
+    else:
+        pattern = r"\[[\s\S]*\]"
+
+    m = re.search(pattern, text)
     if m:
         try:
             result = json.loads(m.group())
-            if isinstance(result, list):
-                return result
+            if expected_type == dict:
+                if isinstance(result, dict):
+                    return result
+            elif expected_type == list:
+                if isinstance(result, list):
+                    return result
+                if isinstance(result, dict) and "subtasks" in result:
+                    return result["subtasks"]
         except json.JSONDecodeError:
             pass
     return None
@@ -298,11 +233,8 @@ def run_agent(goal_dir: str) -> None:
 
     work_dir = os.path.dirname(goal_dir)
     logger = get_logger(work_dir)
-    logger.log_state("session_start", root=goal_dir, session_id=str(uuid.uuid4()))
 
     try:
         meta_agent(goal_dir, depth=0, display_index=1)
-        logger.log_state("session_complete", root=goal_dir)
     except Exception as e:
-        logger.log_state("session_error", root=goal_dir, error=str(e))
         raise

@@ -24,12 +24,12 @@ def make_primitives(node_dir: str, permissions: dict, logger) -> dict:
     ) -> str:
         """
         调用 LLM API。
-        role: default / coder / verifier / planner
+        role: default / coder / observer / planner
         """
         system_prompts = {
             "default": "You are a helpful assistant.",
             "coder": "You are a code generator. Output ONLY the requested code block. Do not include any explanatory text, introductions, or conclusions outside the code block.",
-            "verifier": "You are a verifier. Output ONLY valid JSON. Strictly follow the schema. Do not include any explanatory text outside the JSON.",
+            "observer": "You are an observer. Output ONLY valid JSON. Strictly follow the schema. Do not include any explanatory text outside the JSON.",
             "planner": "You are a planner. Output clear, structured decisions. Be concise and analytical.",
         }
         system_prompt = system_prompts.get(role, system_prompts["default"])
@@ -61,13 +61,6 @@ def make_primitives(node_dir: str, permissions: dict, logger) -> dict:
         if not llm_api_key:
             raise ValueError("LLM_API_KEY not set in environment variables")
 
-        seq = logger.log_trace(
-            kind="llm_call",
-            node=node_dir,
-            context_tokens=context_tokens,
-            prompt_tokens=prompt_tokens,
-        )
-
         try:
             from openai import OpenAI
 
@@ -89,19 +82,9 @@ def make_primitives(node_dir: str, permissions: dict, logger) -> dict:
             if output is None:
                 raise ValueError("LLM returned empty response")
 
-            output_tokens = len(output) // 4
-            logger.log_trace(
-                kind="llm_call_response",
-                node=node_dir,
-                seq=seq,
-                output_tokens=output_tokens,
-            )
             return output
 
         except Exception as e:
-            logger.log_trace(
-                kind="llm_call_error", node=node_dir, seq=seq, error=str(e)
-            )
             raise
 
     return {"llm_call": llm_call}

@@ -1,3 +1,0 @@
-上次你修改了meta-agent-core，使得在AGENT.md中可以设置阈值为运行时参数。你需要判断confidence和uncertainty是不是一致的，如果是则只保留其中一个，去除冗余。另外maxCollectRetry, maxNoProgress, maxIterations这些参数要检查到底有没有用到，如果没有的话可以删除，减少冗余。在AGENT.md里面配置confidence, uncertainty, maxCollectRetry, maxNoProgress, maxIterations这些参数的时候，要清晰地写清楚，他们在什么环节和场景下发生作用。
-
-改完之后调试survey_agent_python/run.py，严格测试修改的正确性。最后完成工作之后要更新survey_agent_python/README.md文档和meta_agent_core/README.md(只做必要的修改)，使得项目状态与描述一致。

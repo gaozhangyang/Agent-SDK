@@ -117,6 +117,11 @@ def parse_args(argv=None):
         action="store_true",
         help="启用调试模式",
     )
+    parser.add_argument(
+        "--recover",
+        action="store_true",
+        help="从上次中断的任务恢复",
+    )
     return parser.parse_args(argv)
 
 
@@ -256,7 +261,8 @@ def build_context_content(config: Dict[str, Any], args) -> str:
         for root, dirs, files in os.walk(BASE_DIR):
             # 跳过运行时生成目录，避免 context 膨胀
             dirs[:] = [
-                d for d in sorted(dirs)
+                d
+                for d in sorted(dirs)
                 if d not in {"goals", "__pycache__", ".git", "pdfs"}
             ]
             level = Path(root).relative_to(BASE_DIR).parts
@@ -314,7 +320,11 @@ def build_context_content(config: Dict[str, Any], args) -> str:
     content += f"| AGENT.md | `{agent_md_path}` |\n"
     content += f"| Skills 根目录 | `{SKILLS_DIR}` |\n"
     for skill_name in skill_names:
-        for py_file in sorted((SKILLS_DIR / skill_name).glob("*.py")) if (SKILLS_DIR / skill_name).exists() else []:
+        for py_file in (
+            sorted((SKILLS_DIR / skill_name).glob("*.py"))
+            if (SKILLS_DIR / skill_name).exists()
+            else []
+        ):
             content += f"| {skill_name}/{py_file.name} | `{py_file.resolve()}` |\n"
     content += f"| 原始论文数据目录 | `{(BASE_DIR / 'data').resolve()}` |\n"
     content += f"| PDF 存储目录 | `{(BASE_DIR / 'data' / 'pdfs').resolve()}` |\n"
@@ -322,6 +332,7 @@ def build_context_content(config: Dict[str, Any], args) -> str:
     content += "\n"
 
     return content
+
 
 def run_recursive_meta_agent(goal_dir: Path) -> Dict[str, Any]:
     """

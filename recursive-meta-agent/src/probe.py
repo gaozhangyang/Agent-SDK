@@ -43,11 +43,6 @@ def probe(
     if depth == 0 and os.path.exists(context_path):
         with open(context_path, "r", encoding="utf-8") as f:
             context = f.read()
-        logger.log_trace(
-            kind="probe_root_context_reused",
-            node=goal_dir,
-            context_length=len(context),
-        )
         return context
 
     parts = []
@@ -94,7 +89,6 @@ def probe(
     with open(context_path, "w", encoding="utf-8") as f:
         f.write(context)
 
-    logger.log_trace(kind="probe_completed", node=goal_dir, context_length=len(context))
     return context
 
 

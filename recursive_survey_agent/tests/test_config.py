@@ -310,9 +310,9 @@ class TestContextContent:
         context = build_context_content(config, args)
 
         assert "Survey Workflow Context" in context
-        assert "Topics Configuration" in context
+        assert "Topics" in context
         assert "Computer_Vision" in context
-        assert "Fetch Configuration" in context
+        assert "Fetch 参数" in context
         assert "10" in context  # fetch_max_papers
 
     def test_build_context_content_with_overrides(self):
@@ -327,7 +327,7 @@ class TestContextContent:
         args = MockArgs(max_results=50)
         context = build_context_content(config, args)
 
-        assert "Override Parameters" in context
+        assert "命令行覆盖参数" in context
         assert "50" in context
 
 
@@ -343,7 +343,7 @@ class TestRecursiveMetaAgentIntegration:
         run.RECURSIVE_META_AGENT_DIR = Path("/nonexistent/path")
 
         try:
-            result = run.run_recursive_meta_agent(Path("/tmp/test"), recover=False)
+            result = run.run_recursive_meta_agent(Path("/tmp/test"))
             assert result["status"] == "error"
             assert "not found" in result["reason"].lower()
         finally:

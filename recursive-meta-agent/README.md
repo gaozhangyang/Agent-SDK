@@ -21,8 +21,8 @@
 ## 第二轮改动概述（2025）
 
 本轮改动围绕三个主题：
-1. **verifier 职责重定位**：从 pass/fail 判断改为直接信息提取
-2. **decomposer 补充兄弟任务上下文**：让 verifier 知道"哪些信息对后续有用"
+1. **observer 职责重定位**：从 pass/fail 判断改为直接信息提取
+2. **decision 补充兄弟任务上下文**：让 observer 知道"哪些信息对后续有用"
 3. **引入 `<<read>>` 间接信息机制**：probe 阶段自动解引用
 
 ---
@@ -39,8 +39,8 @@ def meta_agent(goal_dir, depth):
         script = LLMCall(context, goal)
         observation = Act(script)  # script主动print出需要被观测的信息
 
-        # 验证：verifier 提取 direct_info 和 indirect_files
-        verification = LLMCall(verifier, script, observation)
+        # 验证：observer 提取 direct_info 和 indirect_files
+        verification = LLMCall(observer, script, observation)
         direct_info = verification.direct_info
         indirect_files = verification.indirect_files
 
@@ -53,7 +53,7 @@ def meta_agent(goal_dir, depth):
         subgoals = decompose(context, goal)
         for subgoal in subgoals:
             meta_agent(subgoal, depth+1)
-            # 子任务完成后，其 verifier 结果写入父节点 context.md
+            # 子任务完成后，其 observer 结果写入父节点 context.md
 
     # 唯一的信息流动：无论成败，observation/direct_info 写入父节点 context.md
     if depth == 0:
@@ -66,9 +66,9 @@ def meta_agent(goal_dir, depth):
 
 ## 信息提取机制
 
-### verifier 职责（第二轮改动）
+### observer 职责
 
-**新职责**：
+**职责**：
 - 从 observation（script 的 stdout）中识别对后续任务有直接帮助的信息
 - 区分直接信息和间接信息
 - 把直接信息整理后写入父节点 context.md
@@ -119,7 +119,7 @@ def meta_agent(goal_dir, depth):
 
 **script.py** 以标准 Python 运行，不注入 read/write/bash/llm_call。脚本内可直接使用 `open()`、`subprocess`、`os`、`pathlib` 等，按需 `import`。执行器仅注入变量 **goal_dir**（当前节点目录的绝对路径），并将当前工作目录设为 goal_dir，故相对路径均相对于当前节点。若需调用 LLM，使用环境变量 `LLM_API_KEY`、`LLM_BASE_URL`、`LLM_MODEL` 与 `openai`/`requests` 即可。
 
-**meta-agent 内部**（决策、分解、代码生成、验证）仍通过 `primitives.make_primitives(...)["llm_call"]` 调用 LLM，接口保持单一随机性入口；token 预算、trace 记录等逻辑不变。llm_call 的 **role** 参数：`default` / `coder` / `verifier` / `planner`。
+**meta-agent 内部**（决策、分解、代码生成、观察）仍通过 `primitives.make_primitives(...)["llm_call"]` 调用 LLM，接口保持单一随机性入口；token 预算等逻辑不变。llm_call 的 **role** 参数：`default` / `coder` / `observer` / `planner`。
 
 ---
 
@@ -128,11 +128,8 @@ def meta_agent(goal_dir, depth):
 ```
 {workDir}/
 ├── .agent/                          # 公共工作区，全局可读写（权限控制）
-│   ├── trace.jsonl                  # 全局追踪，记录节点级引用
-│   ├── terminal.md                  # 全局执行日志，一级检索入口
-│   ├── state.jsonl                  # 全局状态流水，追加写
 │   ├── AGENT.md                     # 全局配置，根节点约束，子节点继承
-│   └── sessions/                   # 每次运行摘要索引
+│   └── memory.jsonl                # 记忆记录
 │
 └── {goal}/                          # 根节点，对应用户原始问题
     ├── goal.md                      # 任务描述，只读，由父节点或用户写入
@@ -273,14 +270,14 @@ def probe(goal_dir, goal, permissions, depth):
 Probe 是每个节点执行的第一步，**退化为纯确定性操作**。不再调用 LLM 决定读取哪些文件，而是按固定规则读取：goal.md（当前节点）、../context.md（父节点，仅 depth > 0）。读取父节点 context 时**自动去重**，去除目录结构、Allowed external directories 等公共部分，避免深层节点 context 膨胀。
 
 **第二轮改动**：probe 增加了两个关键功能：
-1. 读取父节点 goal.md 的"后续兄弟任务"段落，追加到当前 context.md，使当前 verifier 能感知到更上层的后续任务需求
+1. 读取父节点 goal.md 的"后续兄弟任务"段落，追加到当前 context.md，使当前 observer 能感知到更上层的后续任务需求
 2. 解引用父节点 context.md 中的 `<<read>>` 块，将文件路径自动转换为文件内容
 
 ### 直接执行
 
 - **代码生成**：由 `prompts/code_generator.md` 驱动，要求模型**同时输出**一段 Python 脚本（`\`\`script` 块）和执行计划（`\`\`plan` 块），禁止 `<tool_code>` 等工具调用标记。脚本使用**标准 Python**（open、subprocess、os 等），执行器仅注入 **goal_dir** 并将当前工作目录设为 goal_dir。根据 goal.md 中的「输出要求」，**主动 print 对应信息**作为 observation。
-- **验证**：执行 script 后，通过 `prompts/verifier.md` 调用 verifier LLM 提取 direct_info 和 indirect_files。不再进行 pass/fail 判断。
-- **信息流动**：verifier 提取的 direct_info 和 indirect_files 由执行器写入父节点 context.md。失败信息也是 direct_info 的一部分。
+ - **验证**：执行 script 后，通过 `prompts/observer.md` 调用 observer LLM 提取 direct_info 和 indirect_files。不再进行 pass/fail 判断。
+ - **信息流动**：observer 提取的 direct_info 和 indirect_files 由执行器写入父节点 context.md。失败信息也是 direct_info 的一部分。
 - **脚本执行**：在**子进程**中通过 `script_runner.py` 执行 `script.py`（仅注入 goal_dir 并 chdir 到 goal_dir），子进程崩溃或超时不会拖垮主进程。子进程的 **stdout 完整捕获**作为 observation。
 - **script.py 输出规范**：script.py 是纯执行者，只 print 可观测的事实。使用结构化标记：
   - `[DONE] <完成的操作描述>` - 每次文件读写或解析操作后输出
@@ -325,7 +322,7 @@ def execute_decompose(goal_dir, goal, subtasks, depth, permissions):
 
 ## 后续兄弟任务
 （当前任务完成后，接下来还有哪些任务，每个任务一行简要描述；
-  verifier 结合此信息判断哪些 observation 对后续任务有直接帮助）
+  observer 结合此信息判断哪些 observation 对后续任务有直接帮助）
 ```
 
 ### context 去重优化
@@ -390,7 +387,7 @@ state.jsonl 追加写，跨 Session 累积，不清空。
 
 ## 一句话总结
 
-> meta-agent 是一个递归函数：probe 退化为确定性操作，决策直接解决或分解子任务。LLMCall 生成 script + plan，执行直接解决模式：后 script 的完整 stdout 作为 observation，verifier 提取 direct_info 和 indirect_files，失败信息也作为 direct_info 写入父节点 context.md。分解执行模式：递归执行子节点，每个子节点完成后 verifier 结果立即追加到父节点 context.md。引入 `<<read>>` 间接信息机制，probe 阶段自动解引用文件路径，支持截断处理避免 context 膨胀。信息流只有一个方向：子节点完成后写入父节点 context.md，根节点例外写入 results.md 供用户查看。
+> meta-agent 是一个递归函数：probe 退化为确定性操作，决策直接解决或分解子任务。LLMCall 生成 script + plan，执行直接解决模式：后 script 的完整 stdout 作为 observation，observer 提取 direct_info 和 indirect_files，失败信息也作为 direct_info 写入父节点 context.md。分解执行模式：递归执行子节点，每个子节点完成后 observer 结果立即追加到父节点 context.md。引入 `<<read>>` 间接信息机制，probe 阶段自动解引用文件路径，支持截断处理避免 context 膨胀。信息流只有一个方向：子节点完成后写入父节点 context.md，根节点例外写入 results.md 供用户查看。
 
 ---
 
@@ -407,9 +404,11 @@ state.jsonl 追加写，跨 Session 累积，不清空。
 7. **权限控制**: permissions.json 向上查找机制
 8. **script 子进程执行**: 通过 `src/script_runner.py` 在子进程中执行 script.py，隔离崩溃；stdout 完整作为 observation
 9. **四段式子任务描述**: 子任务 goal.md 包含任务、输出要求、输出用途、后续兄弟任务四部分（第二轮改动）
-10. **verifier 信息提取**: verifier 不再判断 pass/fail，改为提取 direct_info 和 indirect_files（第二轮改动）
+10. **observer 信息提取**: observer 不再判断 pass/fail，改为提取 direct_info 和 indirect_files
+
 11. **`<<read>>` 间接信息机制**: probe 阶段自动解引用，支持截断处理（第二轮改动）
-12. **信息流**: 子节点 verifier 结果写入父节点 context.md，根节点写入 results.md
+
+12. **信息流**: 子节点 observer 结果写入父节点 context.md，根节点写入 results.md
 13. **统一信息流处理**: meta_agent 末尾统一处理 append_to_parent_context / write_results
 14. **context 去重优化**: probe 读取父节点时去除公共部分，追加 observation 时逐行去重
 
@@ -423,19 +422,17 @@ state.jsonl 追加写，跨 Session 累积，不清空。
 prompts/
 ├── system_prompt.md     # 系统级 prompt，基础角色定义（决策/分解等用）
 ├── code_generator.md   # 代码生成 prompt（直接执行）：同时输出 script + plan、要求 print 标记输出
-├── decision.md         # 决策 prompt（直接解决还是分解）
-├── decomposer.md       # 任务分解 prompt（四段式结构：任务、输出要求、输出用途、后续兄弟任务）
-└── verifier.md        # 验证器 prompt（提取 direct_info 和 indirect_files，第二轮改动）
+├── decision.md         # 决策 prompt（直接解决还是分解，包含四段式子任务描述）
+└── observer.md        # 观察器 prompt（提取 direct_info 和 indirect_files）
 ```
 
 #### 如何自定义
 
 1. **修改系统 prompt**: 编辑 `prompts/system_prompt.md` 可以改变模型的基础角色定义
 2. **修改特定行为**: 
-   - 修改 `prompts/decision.md` 可以改变任务分解策略
-   - 修改 `prompts/decomposer.md` 可以改变子任务生成方式（现在包含后续兄弟任务信息）
+   - 修改 `prompts/decision.md` 可以改变任务分解策略（现已包含四段式子任务描述）
    - 修改 `prompts/code_generator.md` 可以改变代码生成风格与输出要求策略
-   - 修改 `prompts/verifier.md` 可以改变结果验证/信息提取逻辑（第二轮改动后不再返回 pass/fail）
+   - 修改 `prompts/observer.md` 可以改变结果信息提取逻辑（不再返回 pass/fail）
 
 prompt 模板使用 Python 格式化字符串语法，变量用 `{}` 包裹。例如 `{goal}`、`{context}` 等。
 

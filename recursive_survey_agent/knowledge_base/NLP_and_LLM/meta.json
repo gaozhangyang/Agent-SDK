@@ -1,10 +1,6 @@
 {
   "name": "NLP_and_LLM",
-  "description": "自然语言处理与大语言模型相关论文，包括语言模型、文本生成、机器翻译、问答系统等",
-  "keywords": ["language model", "LLM", "transformer", "attention", "large language model", "text generation", "machine translation", "question answering"],
+  "keywords": ["language model", "LLM", "transformer", "attention", "large language model", "text generation"],
   "arxiv_categories": ["cs.CL", "cs.LG"],
-  "paper_count": 0,
-  "min_relevance_score": 0.6,
-  "created_at": "2026-01-01T00:00:00Z",
-  "updated_at": "2026-01-01T00:00:00Z"
+  "min_relevance_score": 0.6
 }

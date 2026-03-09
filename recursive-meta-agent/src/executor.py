@@ -14,7 +14,7 @@ from datetime import datetime
 from logger import get_logger
 from primitives import make_primitives
 from deps import validate_dependencies, get_execution_levels, ValidationError
-from prompts import get_code_generator_prompt, get_verifier_prompt
+from prompts import get_code_generator_prompt, get_observer_prompt
 
 
 # 子进程执行 script 时的默认超时（秒）
@@ -44,6 +44,20 @@ def sanitize_subtask_name(name: str) -> str:
     return name[:64]
 
 
+def _resolve_indirect_paths(paths: List[str], base_dir: str) -> List[str]:
+    """
+    将相对路径转换为以 base_dir 为基准的绝对路径。
+    """
+    resolved = []
+    for p in paths:
+        if isinstance(p, str) and p.strip():
+            if os.path.isabs(p):
+                resolved.append(os.path.normpath(p))
+            else:
+                resolved.append(os.path.normpath(os.path.join(base_dir, p)))
+    return resolved
+
+
 # ---------------------------------------------------------------------------
 # script 解析工具
 # ---------------------------------------------------------------------------
@@ -54,18 +68,6 @@ def _strip_tool_markup(text: str) -> str:
     text = re.sub(r"<tool_code>.*?</tool_code>", "", text, flags=re.DOTALL)
     text = re.sub(r"<tool\s+name=[^>]*>.*?</tool>", "", text, flags=re.DOTALL)
     return text
-
-
-def parse_script(llm_output: str) -> str:
-    """从 LLM 输出中提取 Python 脚本"""
-    llm_output = _strip_tool_markup(llm_output)
-
-    for pattern in [r"```python\n(.*?)```", r"```script\n(.*?)```", r"```\n(.*?)```"]:
-        m = re.search(pattern, llm_output, re.DOTALL)
-        if m:
-            return m.group(1).strip()
-
-    return llm_output.strip()
 
 
 def parse_script_plan(llm_output: str) -> tuple:
@@ -91,13 +93,13 @@ def parse_script_plan(llm_output: str) -> tuple:
 
 
 # ---------------------------------------------------------------------------
-# verifier 解析工具
+# observer 解析工具
 # ---------------------------------------------------------------------------
 
 
-def parse_verifier_response(llm_output: str) -> dict:
+def parse_observer_response(llm_output: str) -> dict:
     """
-    解析 verifier LLM 的输出。
+    解析 observer LLM 的输出。
     新格式: {"direct_info": str, "indirect_files": list}
     """
     import re
@@ -189,7 +191,6 @@ def execute_script(goal_dir: str, permissions: dict, logger) -> str:
             f"Script exited with code {result.returncode}. Console output: {console_output[:500]}"
         )
 
-    logger.log_trace(kind="script_executed", node=goal_dir)
     return console_output
 
 
@@ -204,7 +205,7 @@ def execute_with_verification(
     """
     直接执行模式。
     - 执行一次 script
-    - 调用 verifier 提取 direct_info 和 indirect_files
+    - 调用 observer 提取 direct_info 和 indirect_files
     - 返回包含提取信息的字典
     """
     primitives = make_primitives(goal_dir, permissions, logger)
@@ -222,21 +223,17 @@ def execute_with_verification(
     )
 
     script_plan_content = llm_call(
-        context=[goal, context],
-        prompt=prompt,
+        context=context,
+        prompt=f"\n\n[PROMPT]\\n{prompt}\n[GOAL]\\n{goal}",
         role="coder",
     )
 
     script, plan = parse_script_plan(script_plan_content)
-    if not script:
-        script = parse_script(script_plan_content)
 
     # 写入 script.py
     script_path = os.path.join(goal_dir, "script.py")
     with open(script_path, "w", encoding="utf-8") as f:
         f.write(script)
-
-    logger.log_trace(kind="script_generated", node=goal_dir)
 
     # 执行 script
     observation = ""
@@ -247,33 +244,25 @@ def execute_with_verification(
         observation = f"Execution failed: {type(e).__name__}: {e}"
 
     # 提取信息（不再做 pass/fail 判断）
-    verifier_template = get_verifier_prompt()
-    verifier_prompt = verifier_template.format(
+    observer_template = get_observer_prompt()
+    observer_prompt = observer_template.format(
         original_goal=goal,
         plan=plan or "No plan provided",
         script=script,
         console_output=observation,
     )
 
-    verifier_response = llm_call(
+    observer_response = llm_call(
         context=[goal, plan or "", script, observation],
-        prompt=verifier_prompt,
-        role="verifier",
+        prompt=observer_prompt,
+        role="observer",
     )
 
-    verification = parse_verifier_response(verifier_response)
+    verification = parse_observer_response(observer_response)
     raw_indirect = verification.get("indirect_files", [])
 
     # 将相对路径转为以 goal_dir 为基准的绝对路径
-    indirect_files_abs = []
-    for p in raw_indirect:
-        if isinstance(p, str) and p.strip():
-            if os.path.isabs(p):
-                indirect_files_abs.append(os.path.normpath(p))
-            else:
-                indirect_files_abs.append(
-                    os.path.normpath(os.path.join(goal_dir, p))
-                )
+    indirect_files_abs = _resolve_indirect_paths(raw_indirect, goal_dir)
 
     # 返回包含直接信息和间接文件的信息字典
     return {
@@ -304,8 +293,8 @@ def append_to_parent_context(
     Args:
         parent_dir: 父节点目录
         subtask_name: 子任务名称
-        direct_info: verifier 提取的直接信息
-        indirect_files: verifier 识别的间接文件路径列表
+        direct_info: observer 提取的直接信息
+        indirect_files: observer 识别的间接文件路径列表
     """
     context_path = os.path.join(parent_dir, "context.md")
 
