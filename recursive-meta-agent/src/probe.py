@@ -36,6 +36,20 @@ def probe(
     4. 父节点 goal.md 的"后续兄弟任务"段落（仅 depth > 0）
     5. 解引用父节点 context.md 中的 <<read>> 块
     """
+    # 根节点的首次 context 初始化可以由上层（如 recursive_survey_agent）预先完成，
+    # 此处如果检测到 depth == 0 且 context.md 已存在，则直接复用，不再覆盖，
+    # 避免破坏上层为特定 workflow 精心构建的大 context。
+    context_path = os.path.join(goal_dir, "context.md")
+    if depth == 0 and os.path.exists(context_path):
+        with open(context_path, "r", encoding="utf-8") as f:
+            context = f.read()
+        logger.log_trace(
+            kind="probe_root_context_reused",
+            node=goal_dir,
+            context_length=len(context),
+        )
+        return context
+
     parts = []
 
     # 1. 目录结构
@@ -77,7 +91,6 @@ def probe(
         )
 
     # 写入 context.md（时机1：初始化）
-    context_path = os.path.join(goal_dir, "context.md")
     with open(context_path, "w", encoding="utf-8") as f:
         f.write(context)
 

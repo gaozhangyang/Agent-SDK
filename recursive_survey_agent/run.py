@@ -190,46 +190,138 @@ def setup_goal_directory(goal: str, config: Dict[str, Any], args) -> Path:
 
 
 def build_context_content(config: Dict[str, Any], args) -> str:
-    """构建初始上下文内容"""
-    content = "# Survey Workflow Context\n\n"
+    """构建初始上下文内容，预加载所有关键文档，让 LLM 无需探索即可直接使用 skills"""
 
-    # 添加 topics 配置
+    SKILLS_DIR = BASE_DIR / "skills"
+
+    def _read_file(path: Path) -> str:
+        try:
+            return path.read_text(encoding="utf-8")
+        except Exception as e:
+            return f"[Failed to read {path}: {e}]"
+
+    content = "# Survey Workflow Context\n\n"
+    content += f"> 工作目录: {BASE_DIR}\n\n"
+
+    # -----------------------------------------------------------------------
+    # 1. AGENT.md —— Workflow 规范 + 运行时配置（最重要，放最前）
+    # -----------------------------------------------------------------------
+    agent_md_path = BASE_DIR / ".agent" / "AGENT.md"
+    content += "## AGENT.md (Workflow 规范 & 运行时配置)\n\n"
+    content += f"> 路径: {agent_md_path}\n\n"
+    content += _read_file(agent_md_path)
+    content += "\n\n"
+
+    # -----------------------------------------------------------------------
+    # 2. README —— 项目整体说明
+    # -----------------------------------------------------------------------
+    readme_path = BASE_DIR / "README.md"
+    content += "## README (项目说明)\n\n"
+    content += f"> 路径: {readme_path}\n\n"
+    content += _read_file(readme_path)
+    content += "\n\n"
+
+    # -----------------------------------------------------------------------
+    # 3. Skills 文档 —— 完整内联，让 LLM 直接知道每个 skill 的调用方式
+    # -----------------------------------------------------------------------
+    content += "## Skills 使用手册\n\n"
+    content += (
+        "> 以下每个 skill 的 SKILL.md 已内联。生成 script.py 时直接按照示例调用，"
+        "无需再读取文件探索。所有路径均为绝对路径。\n\n"
+    )
+
+    skill_names = ["arxiv_api", "screening", "writing", "pdf_extract"]
+    for skill_name in skill_names:
+        skill_md_path = SKILLS_DIR / skill_name / "SKILL.md"
+        content += f"### Skill: {skill_name}\n\n"
+        content += f"> SKILL.md 路径: {skill_md_path}\n\n"
+        content += _read_file(skill_md_path)
+        content += "\n\n"
+
+        # 同时列出 skill 目录下其他 .py 文件的绝对路径，方便 script.py 直接调用
+        skill_dir = SKILLS_DIR / skill_name
+        py_files = sorted(skill_dir.glob("*.py")) if skill_dir.exists() else []
+        if py_files:
+            content += f"**{skill_name} 可执行脚本（绝对路径）：**\n\n"
+            for py_file in py_files:
+                content += f"- `{py_file.resolve()}`\n"
+            content += "\n"
+
+    # -----------------------------------------------------------------------
+    # 4. 工作目录结构 snapshot
+    # -----------------------------------------------------------------------
+    content += "## 工作目录结构\n\n"
+    content += f"```\n{BASE_DIR}\n"
+    try:
+        for root, dirs, files in os.walk(BASE_DIR):
+            # 跳过运行时生成目录，避免 context 膨胀
+            dirs[:] = [
+                d for d in sorted(dirs)
+                if d not in {"goals", "__pycache__", ".git", "pdfs"}
+            ]
+            level = Path(root).relative_to(BASE_DIR).parts
+            indent = "    " * len(level)
+            folder_name = os.path.basename(root)
+            if root != str(BASE_DIR):
+                content += f"{indent}{folder_name}/\n"
+            sub_indent = "    " * (len(level) + 1)
+            for f in sorted(files):
+                content += f"{sub_indent}{f}\n"
+    except Exception as e:
+        content += f"[Failed to walk directory: {e}]\n"
+    content += "```\n\n"
+
+    # -----------------------------------------------------------------------
+    # 5. 运行时参数 & fetch 配置
+    # -----------------------------------------------------------------------
+    content += "## 运行时配置\n\n"
+
+    # Topics
     topics = config.get("topics", [])
     if topics:
-        content += "## Topics Configuration\n\n"
+        content += "### Topics\n\n"
         content += "```json\n"
         content += json.dumps(topics, indent=2, ensure_ascii=False)
         content += "\n```\n\n"
 
-    # 添加命令行参数
-    if args.max_results or args.start_date or args.research_query:
-        content += "## Override Parameters\n\n"
-        if args.max_results:
-            content += f"- max_results: {args.max_results}\n"
-        if args.start_date:
-            content += f"- start_date: {args.start_date}\n"
-        if args.end_date:
-            content += f"- end_date: {args.end_date}\n"
-        if args.research_query:
-            content += f"- research_query: {args.research_query}\n"
-        content += "\n"
-
-    # 添加 fetch 配置
-    content += f"## Fetch Configuration\n\n"
+    # Fetch 参数
+    content += "### Fetch 参数\n\n"
     content += f"- fetch_max_papers: {config.get('fetch_max_papers', 10)}\n"
-    content += f"- pdf_download_dir: {config.get('pdf_download_dir', 'data/pdfs')}\n"
+    content += f"- pdf_download_dir: {(BASE_DIR / config.get('pdf_download_dir', 'data/pdfs')).resolve()}\n"
     content += f"- screening_threshold: {config.get('screening_threshold', 0.6)}\n\n"
 
-    # 添加 skills 路径
-    content += "## Skills Paths\n\n"
-    skills_dir = BASE_DIR / "skills"
-    for skill_name in ["arxiv_api", "screening", "writing", "pdf_extract"]:
-        skill_path = skills_dir / skill_name / "SKILL.md"
-        if skill_path.exists():
-            content += f"- {skill_name}: {skill_path}\n"
+    # 命令行覆盖参数
+    overrides = {
+        "max_results": args.max_results,
+        "start_date": args.start_date,
+        "end_date": getattr(args, "end_date", None),
+        "research_query": args.research_query,
+    }
+    active_overrides = {k: v for k, v in overrides.items() if v}
+    if active_overrides:
+        content += "### 命令行覆盖参数\n\n"
+        for k, v in active_overrides.items():
+            content += f"- {k}: {v}\n"
+        content += "\n"
+
+    # -----------------------------------------------------------------------
+    # 6. 关键路径速查表（绝对路径）
+    # -----------------------------------------------------------------------
+    content += "## 关键路径速查表\n\n"
+    content += "| 用途 | 绝对路径 |\n"
+    content += "|------|----------|\n"
+    content += f"| 工作根目录 | `{BASE_DIR}` |\n"
+    content += f"| AGENT.md | `{agent_md_path}` |\n"
+    content += f"| Skills 根目录 | `{SKILLS_DIR}` |\n"
+    for skill_name in skill_names:
+        for py_file in sorted((SKILLS_DIR / skill_name).glob("*.py")) if (SKILLS_DIR / skill_name).exists() else []:
+            content += f"| {skill_name}/{py_file.name} | `{py_file.resolve()}` |\n"
+    content += f"| 原始论文数据目录 | `{(BASE_DIR / 'data').resolve()}` |\n"
+    content += f"| PDF 存储目录 | `{(BASE_DIR / 'data' / 'pdfs').resolve()}` |\n"
+    content += f"| 知识库目录 | `{(BASE_DIR / 'knowledge_base').resolve()}` |\n"
+    content += "\n"
 
     return content
-
 
 def run_recursive_meta_agent(goal_dir: Path) -> Dict[str, Any]:
     """
