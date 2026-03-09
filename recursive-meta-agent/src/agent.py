@@ -57,6 +57,9 @@ def meta_agent(
 
     context = ""
     observation = ""  # 初始化 observation
+    direct_info = ""  # 初始化 direct_info
+    indirect_files = []  # 初始化 indirect_files
+    decision_type = "direct"  # 初始化 decision_type
 
     # 深度限制 → 强制直接执行
     if depth >= permissions.get("max_depth", MAX_DEPTH):
@@ -81,24 +84,34 @@ def meta_agent(
     try:
         if decision_type == "direct":
             # 直接执行模式
-            observation = execute_with_verification(
+            result = execute_with_verification(
                 goal_dir, goal, context, permissions, logger, depth
             )
+            # 从结果中提取信息
+            observation = result.get("observation", "")
+            direct_info = result.get("direct_info", "")
+            indirect_files = result.get("indirect_files", [])
         else:
             # 分解模式
             subtasks = _get_subtasks(context, goal, permissions, logger, goal_dir)
             if not subtasks:
                 # 无法分解，回退到直接执行
                 logger.log_trace(kind="decompose_fallback", node=goal_dir)
-                observation = execute_with_verification(
+                result = execute_with_verification(
                     goal_dir, goal, context, permissions, logger, depth
                 )
+                observation = result.get("observation", "")
+                direct_info = result.get("direct_info", "")
+                indirect_files = result.get("indirect_files", [])
             else:
-                # 分解执行：每个子任务完成后，其 observation 会在子节点的 meta_agent 末尾写入
+                # 分解执行：每个子任务完成后，其 verifier 结果（direct_info + indirect_files）
+                # 会在子节点的 meta_agent 末尾写入父节点 context.md
                 # 父节点这边不需要额外处理
                 execute_decompose(goal_dir, goal, subtasks, depth, permissions, logger)
                 # 分解执行完成后，父节点自己的 observation 为空（因为是汇总模式）
                 observation = "Decompose completed"
+                direct_info = ""
+                indirect_files = []
 
         logger.log_trace(kind="node_completed", node=goal_dir)
         logger.log_terminal(seq, goal_dir, "📍", f"{display_label} 完成")
@@ -108,8 +121,10 @@ def meta_agent(
         logger.log_terminal(seq, goal_dir, "⚠️", f"{display_label} 失败 → {str(e)[:50]}")
         # 失败时，失败原因本身就是 observation
         observation = f"Failed: {str(e)}"
+        direct_info = f"Failed: {str(e)}"
+        indirect_files = []
 
-    # 唯一的信息流动：无论成败，observation 写入父节点 context.md
+    # 唯一的信息流动：无论成败，observation/direct_info 写入父节点 context.md
     if depth == 0:
         # 根节点例外：写入 results.md
         write_results(goal_dir, observation)
@@ -117,7 +132,15 @@ def meta_agent(
         # 非根节点：写入父节点 context.md
         parent_dir = os.path.dirname(goal_dir)
         subtask_name = os.path.basename(goal_dir)
-        append_to_parent_context(parent_dir, subtask_name, observation)
+        # decompose 模式下 observation = "Decompose completed"，不需要写入
+        # 只有 direct 模式需要写入 direct_info 和 indirect_files
+        if decision_type == "direct":
+            append_to_parent_context(
+                parent_dir, subtask_name, direct_info, indirect_files
+            )
+        elif observation and observation != "Decompose completed":
+            # 回退到 direct 模式的情况
+            append_to_parent_context(parent_dir, subtask_name, observation, [])
 
 
 # ---------------------------------------------------------------------------

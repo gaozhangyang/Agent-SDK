@@ -98,7 +98,7 @@ def parse_script_plan(llm_output: str) -> tuple:
 def parse_verifier_response(llm_output: str) -> dict:
     """
     解析 verifier LLM 的输出。
-    期望格式: {"pass": bool, "reason": str}
+    新格式: {"direct_info": str, "indirect_files": list}
     """
     import re
 
@@ -113,10 +113,10 @@ def parse_verifier_response(llm_output: str) -> dict:
     # 尝试解析清理后的 JSON
     try:
         result = json.loads(cleaned)
-        if isinstance(result, dict) and "pass" in result:
+        if isinstance(result, dict):
             return {
-                "pass": result.get("pass", False),
-                "reason": result.get("reason", ""),
+                "direct_info": result.get("direct_info", ""),
+                "indirect_files": result.get("indirect_files", []),
             }
     except json.JSONDecodeError:
         pass
@@ -126,17 +126,17 @@ def parse_verifier_response(llm_output: str) -> dict:
     if json_match:
         try:
             result = json.loads(json_match.group())
-            if isinstance(result, dict) and "pass" in result:
+            if isinstance(result, dict):
                 return {
-                    "pass": result.get("pass", False),
-                    "reason": result.get("reason", ""),
+                    "direct_info": result.get("direct_info", ""),
+                    "indirect_files": result.get("indirect_files", []),
                 }
         except json.JSONDecodeError:
             pass
 
     return {
-        "pass": False,
-        "reason": f"Failed to parse verifier response: {llm_output[:200]}",
+        "direct_info": llm_output,  # 如果解析失败，把原始输出当作直接信息
+        "indirect_files": [],
     }
 
 
@@ -200,110 +200,87 @@ def execute_script(goal_dir: str, permissions: dict, logger) -> str:
 
 def execute_with_verification(
     goal_dir: str, goal: str, context: str, permissions: dict, logger, depth: int = 0
-) -> str:
+) -> dict:
     """
     直接执行模式。
-    - 保留一次重试机会处理 execution_error
-    - 两次都失败，返回失败原因作为 observation
-    - 返回最终的 observation 字符串
+    - 执行一次 script
+    - 调用 verifier 提取 direct_info 和 indirect_files
+    - 返回包含提取信息的字典
     """
     primitives = make_primitives(goal_dir, permissions, logger)
     llm_call = primitives["llm_call"]
 
-    last_script = ""
-    last_feedback = ""
+    # 生成 script
+    code_gen_template = get_code_generator_prompt()
+    prompt = code_gen_template.format(
+        original_goal=goal,
+        current_goal=goal,
+        context=context,
+        error_hint="",
+        goal_dir=goal_dir,
+        HISTORY_BLOCK="",
+    )
 
-    for attempt in range(2):  # 最多两次尝试
-        # 历史块：只保留上一时刻
-        history_block = ""
-        if last_script:
-            history_block = (
-                f"\n# === Previous attempt ===\n"
-                f"Script:\n```\n{last_script}\n```\n"
-                f"Feedback: {last_feedback}\n\n"
-                f"IMPORTANT: Make MINIMAL changes to fix only what's necessary.\n"
-            )
+    script_plan_content = llm_call(
+        context=[goal, context],
+        prompt=prompt,
+        role="coder",
+    )
 
-        error_hint_block = (
-            f"\nError/feedback from previous attempt:\n{last_feedback}"
-            if last_feedback
-            else ""
-        )
+    script, plan = parse_script_plan(script_plan_content)
+    if not script:
+        script = parse_script(script_plan_content)
 
-        code_gen_template = get_code_generator_prompt()
-        prompt = code_gen_template.format(
-            original_goal=goal,
-            current_goal=goal,
-            context=context,
-            error_hint=error_hint_block,
-            goal_dir=goal_dir,
-            HISTORY_BLOCK=history_block,
-        )
+    # 写入 script.py
+    script_path = os.path.join(goal_dir, "script.py")
+    with open(script_path, "w", encoding="utf-8") as f:
+        f.write(script)
 
-        script_plan_content = llm_call(
-            context=[goal, context, last_feedback, last_script],
-            prompt=prompt,
-            role="coder",
-        )
+    logger.log_trace(kind="script_generated", node=goal_dir)
 
-        script, plan = parse_script_plan(script_plan_content)
-        if not script:
-            script = parse_script(script_plan_content)
+    # 执行 script
+    observation = ""
+    try:
+        console_output = execute_script(goal_dir, permissions, logger)
+        observation = console_output
+    except Exception as e:
+        observation = f"Execution failed: {type(e).__name__}: {e}"
 
-        # 写入 script.py + 带编号备份（方便调试）
-        script_path = os.path.join(goal_dir, "script.py")
-        with open(script_path, "w", encoding="utf-8") as f:
-            f.write(script)
-        backup_path = os.path.join(goal_dir, f"script_attempt_{attempt + 1}.py")
-        with open(backup_path, "w", encoding="utf-8") as f:
-            f.write(script)
+    # 提取信息（不再做 pass/fail 判断）
+    verifier_template = get_verifier_prompt()
+    verifier_prompt = verifier_template.format(
+        original_goal=goal,
+        plan=plan or "No plan provided",
+        script=script,
+        console_output=observation,
+    )
 
-        logger.log_trace(kind="script_generated", node=goal_dir, attempt=attempt + 1)
+    verifier_response = llm_call(
+        context=[goal, plan or "", script, observation],
+        prompt=verifier_prompt,
+        role="verifier",
+    )
 
-        # 执行 script
-        observation = ""
-        try:
-            console_output = execute_script(goal_dir, permissions, logger)
-            # script 的完整 stdout 即为 observation
-            observation = console_output
-        except Exception as e:
-            # execution_error：失败原因本身就是 observation
-            observation = f"Execution failed: {type(e).__name__}: {e}"
+    verification = parse_verifier_response(verifier_response)
+    raw_indirect = verification.get("indirect_files", [])
 
-        # 验证（pass/fail）
-        verifier_template = get_verifier_prompt()
-        verifier_prompt = verifier_template.format(
-            original_goal=goal,
-            plan=plan or "No plan provided",
-            script=script,
-            console_output=observation,
-        )
+    # 将相对路径转为以 goal_dir 为基准的绝对路径
+    indirect_files_abs = []
+    for p in raw_indirect:
+        if isinstance(p, str) and p.strip():
+            if os.path.isabs(p):
+                indirect_files_abs.append(os.path.normpath(p))
+            else:
+                indirect_files_abs.append(
+                    os.path.normpath(os.path.join(goal_dir, p))
+                )
 
-        verifier_response = llm_call(
-            context=[goal, plan or "", script, observation],
-            prompt=verifier_prompt,
-            role="verifier",
-        )
-
-        verification = parse_verifier_response(verifier_response)
-
-        if verification.get("pass", False):
-            logger.log_trace(
-                kind="verification_passed", node=goal_dir, attempt=attempt + 1
-            )
-            # 返回 observation（供 meta_agent 末尾统一写入）
-            return observation
-
-        # 验证失败
-        feedback = verification.get("reason", "Verification failed")
-
-        # 第一次失败，准备第二次尝试
-        if attempt == 0:
-            last_feedback = feedback
-            last_script = script
-
-    # 两次都失败：返回失败原因作为 observation
-    return last_feedback
+    # 返回包含直接信息和间接文件的信息字典
+    return {
+        "observation": observation,
+        "direct_info": verification.get("direct_info", ""),
+        "indirect_files": indirect_files_abs,
+    }
 
 
 def write_results(goal_dir: str, observation: str) -> None:
@@ -314,16 +291,25 @@ def write_results(goal_dir: str, observation: str) -> None:
 
 
 def append_to_parent_context(
-    parent_dir: str, subtask_name: str, observation: str
+    parent_dir: str,
+    subtask_name: str,
+    direct_info: str,
+    indirect_files: Optional[List[str]] = None,
 ) -> None:
     """
-    把子节点的 observation 追加到父节点的 context.md。
+    把子节点的直接信息和间接文件追加到父节点的 context.md。
     按子任务名称加标题追加，保持信息完整性。
     写入前逐行去重，避免冗余信息累积。
+
+    Args:
+        parent_dir: 父节点目录
+        subtask_name: 子任务名称
+        direct_info: verifier 提取的直接信息
+        indirect_files: verifier 识别的间接文件路径列表
     """
     context_path = os.path.join(parent_dir, "context.md")
 
-    if not observation:
+    if not direct_info and not indirect_files:
         return
 
     # 读取已有 context，逐行去重
@@ -335,13 +321,24 @@ def append_to_parent_context(
                 if stripped:
                     existing_lines.add(stripped)
 
-    # 构建新内容，去除已存在的行
+    # 构建新内容
     new_lines = []
-    for line in observation.splitlines():
-        stripped = line.strip()
-        if stripped and stripped not in existing_lines:
-            new_lines.append(line)
-            existing_lines.add(stripped)  # 防止同一段落内重复
+
+    # 写入直接信息，去除已存在的行
+    if direct_info:
+        for line in direct_info.splitlines():
+            stripped = line.strip()
+            if stripped and stripped not in existing_lines:
+                new_lines.append(line)
+                existing_lines.add(stripped)  # 防止同一段落内重复
+
+    # 写入间接文件的 <<read>> 块
+    if indirect_files:
+        for file_path in indirect_files:
+            read_block = f"<<read>> {file_path} <<read/>>"
+            if read_block not in existing_lines:
+                new_lines.append(read_block)
+                existing_lines.add(read_block)
 
     if not new_lines:
         return

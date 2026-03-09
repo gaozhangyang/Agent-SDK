@@ -124,7 +124,7 @@ python run.py
 | ------------------ | --------------- | ------------------------------------- |
 | `--max-results`    | 本次最大抓取篇数        | `--max-results 20`                    |
 | `--start-date`     | 开始日期 (YYYYMMDD) | `--start-date 20260301`               |
-| `--end-date`       | 结束日期 (YYYYMMDD) | `--end-date 20260303`                 |
+| `--end-date`       | 结束日期 (YYYYMMDD) | `--end-date 20260303`               |
 | `--research-query` | 研究关键词           | `--research-query "video generation"` |
 | `--debug`          | 启用调试模式          | `--debug`                             |
 
@@ -207,6 +207,8 @@ python run.py
 
 > **优化**：已优化 context 去重。随着子节点深度增加，context.md 中会累积大量冗余内容（特别是 "Allowed external directories" 部分）。现在 probe 读取父节点 context 时会自动去除公共部分，追加 observation 时逐行去重，避免深层节点 context 膨胀。
 
+> **第二轮改动（2025）**：verifier 职责从 pass/fail 判断改为直接信息提取（direct_info + indirect_files）；decomposer 生成的四段式子任务描述增加了"后续兄弟任务"信息；引入 `<<read>>` 间接信息机制，probe 阶段自动解引用文件路径，支持截断处理避免 context 膨胀。
+
 ### 四个原语
 
 
@@ -225,6 +227,7 @@ python run.py
 3. **context.md 是唯一信息载体** - 子节点完成后写入父节点 context.md，供后续兄弟任务订阅
 4. **根节点例外** - 根节点保留 results.md 作为最终输出，供用户查看
 5. **LLMCall 是唯一随机性入口** - 其余一切保持确定性
+6. **间接信息解引用** - 通过 `<<read>>` 块机制，probe 阶段自动将文件路径解引用为文件内容
 
 ## 测试
 

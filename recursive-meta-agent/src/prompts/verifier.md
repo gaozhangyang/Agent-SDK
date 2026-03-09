@@ -1,27 +1,24 @@
-Verify whether the execution result meets the original goal.
+Extract useful information from the execution result for subsequent tasks.
 
-Original goal:
-{original_goal}
+Input:
+- goal.md content (what to do, output requirements, output usage, subsequent sibling tasks)
+- script content
+- observation (script's complete stdout)
 
-Plan:
-{plan}
-
-Script executed:
-{script}
-
-Console output (script's stdout):
-{console_output}
-
+Output:
 Return ONLY valid JSON, no additional text:
 ```json
 {{
-  "pass": true or false,
-  "reason": "简短描述失败原因，pass 为 true 时留空"
+  "direct_info": "Specific information that can be directly used in script, formatted as clear text",
+  "indirect_files": ["path/to/file1", "path/to/file2"]
 }}
 ```
 
 Rules:
-- 如果 console_output 显示任务成功完成 → pass: true
-- 如果 console_output 显示失败 → pass: false
-- reason 必须足够具体，以便下次尝试修复问题
-- 失败时，reason 本身作为 observation 写入父节点 context.md
+- direct_info: Only include directly usable specific values (e.g., API parameters, parsed config values, specific data that can be copied into a script). Do NOT include file paths.
+- indirect_files: Only include file paths that point to information storage locations (files that subsequent tasks need to read). Examples:
+  - File paths where results were written (e.g., "results written to data/selected_papers.json")
+  - Directory locations containing configuration
+- Combine with goal.md's "subsequent sibling tasks" section to determine which information is truly useful for subsequent tasks
+- Failure information is also direct_info and should be written to direct_info (failure reason, error details)
+- If no useful information found, return empty strings for both fields
