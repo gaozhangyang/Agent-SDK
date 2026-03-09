@@ -3,9 +3,6 @@ Analyze this task and decide whether to solve it directly or decompose it into s
 Goal:
 {goal}
 
-Context:
-{context}
-
 ## 决策标准
 
 在返回 "direct" 之前，先回答以下两个问题：

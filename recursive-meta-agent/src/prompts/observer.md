@@ -1,9 +1,12 @@
 Extract useful information from the execution result for subsequent tasks.
 
 Input:
-- goal.md content (what to do, output requirements, output usage, subsequent sibling tasks)
+- Goal:
+{goal}
 - script content
+{script}
 - observation (script's complete stdout)
+{observation}
 
 Output:
 Return ONLY valid JSON, no additional text:

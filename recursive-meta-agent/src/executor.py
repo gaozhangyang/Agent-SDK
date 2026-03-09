@@ -70,26 +70,21 @@ def _strip_tool_markup(text: str) -> str:
     return text
 
 
-def parse_script_plan(llm_output: str) -> tuple:
+def parse_script(script_content: str) -> tuple:
     """
-    从 LLM 输出中同时解析 script 和 plan。
-    返回: (script, plan) 元组
+    从 LLM 输出中解析 script。
+    返回: script
     """
-    llm_output = _strip_tool_markup(llm_output)
+    script_content = _strip_tool_markup(script_content)
 
     script = ""
-    for pattern in [r"```python\n(.*?)```", r"```script\n(.*?)```"]:
-        m = re.search(pattern, llm_output, re.DOTALL)
+    for pattern in [r"```python\n(.*?)\n```", r"```script\n(.*?)\n```"]:
+        m = re.search(pattern, script_content, re.DOTALL)
         if m:
             script = m.group(1).strip()
             break
 
-    plan = ""
-    m = re.search(r"```plan\n(.*?)```", llm_output, re.DOTALL)
-    if m:
-        plan = m.group(1).strip()
-
-    return script, plan
+    return script
 
 
 # ---------------------------------------------------------------------------
@@ -214,21 +209,17 @@ def execute_with_verification(
     # 生成 script
     code_gen_template = get_code_generator_prompt()
     prompt = code_gen_template.format(
-        original_goal=goal,
         current_goal=goal,
-        context=context,
-        error_hint="",
         goal_dir=goal_dir,
-        HISTORY_BLOCK="",
     )
 
-    script_plan_content = llm_call(
+    script_content = llm_call(
         context=context,
-        prompt=f"\n\n[PROMPT]\\n{prompt}\n[GOAL]\\n{goal}",
+        prompt=prompt,
         role="coder",
     )
 
-    script, plan = parse_script_plan(script_plan_content)
+    script = parse_script(script_content)
 
     # 写入 script.py
     script_path = os.path.join(goal_dir, "script.py")
@@ -246,14 +237,13 @@ def execute_with_verification(
     # 提取信息（不再做 pass/fail 判断）
     observer_template = get_observer_prompt()
     observer_prompt = observer_template.format(
-        original_goal=goal,
-        plan=plan or "No plan provided",
+        goal=goal,
         script=script,
-        console_output=observation,
+        observation=observation,
     )
 
     observer_response = llm_call(
-        context=[goal, plan or "", script, observation],
+        context=context,
         prompt=observer_prompt,
         role="observer",
     )

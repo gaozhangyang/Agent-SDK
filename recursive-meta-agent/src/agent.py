@@ -161,8 +161,7 @@ def _make_decision(
 
     decision_template = get_decision_prompt()
     prompt = decision_template.format(
-        goal=goal,
-        context=context,
+        goal=goal
     )
 
     try:
