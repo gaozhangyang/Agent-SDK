@@ -180,6 +180,7 @@ def setup_goal_directory(goal: str, config: Dict[str, Any], args) -> Path:
             "total": config.get("context_budget_total", 200000),
             "reservedOutput": config.get("context_budget_reserved", 4000),
         },
+        "context_max_chars": config.get("context_max_chars", 800000),
     }
 
     permissions_path = goal_dir / "permissions.json"

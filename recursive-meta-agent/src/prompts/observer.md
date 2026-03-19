@@ -1,27 +1,27 @@
-Extract useful information from the execution result for subsequent tasks.
+Extract structured execution results for the runtime.
 
 Input:
 - Goal:
 {goal}
-- script content
+- Script:
 {script}
-- observation (script's complete stdout)
+- Observation:
 {observation}
 
-Output:
-Return ONLY valid JSON, no additional text:
+Return valid JSON only:
 ```json
 {{
-  "direct_info": "Specific information that can be directly used in script, formatted as clear text",
-  "indirect_files": ["path/to/file1", "path/to/file2"]
+  "status": "success | partial | failed",
+  "summary": "One concise summary of what happened",
+  "direct_info": "Information that a later script can use directly without re-reading a file",
+  "indirect_files": ["path/to/file"],
+  "open_questions": ["missing detail or unresolved issue"],
+  "recommended_next_action": "finish | direct_retry | decompose"
 }}
 ```
 
 Rules:
-- direct_info: Only include directly usable specific values (e.g., API parameters, parsed config values, specific data that can be copied into a script). Do NOT include file paths.
-- indirect_files: Only include file paths that point to information storage locations (files that subsequent tasks need to read). Examples:
-  - File paths where results were written (e.g., "results written to data/selected_papers.json")
-  - Directory locations containing configuration
-- Combine with goal.md's "subsequent sibling tasks" section to determine which information is truly useful for subsequent tasks
-- Failure information is also direct_info and should be written to direct_info (failure reason, error details)
-- If no useful information found, return empty strings for both fields
+- Mark `success` only when the goal appears completed from the observation.
+- Put failure reasons in `direct_info`.
+- `indirect_files` must contain file paths only.
+- Keep `summary` concise and factual.

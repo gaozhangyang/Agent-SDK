@@ -55,7 +55,6 @@ recursive_survey_agent/
 └── README.md                 # 项目说明
 ```
 
-
 ## Survey Workflow
 
 > **重要说明**：Python 代码只负责提供必要的工具/脚本和目录结构，真正的工作流程由 recursive-meta-agent 自己推理。
@@ -165,7 +164,7 @@ output = bash("""python skills/screening/screen_papers.py \
 {
   "llm": {
     "baseUrl": "http://35.220.164.252:3888/v1",
-    "model": "MiniMax-M2.5",
+    "model": "qwen3.5-plus",
     "apiKey": "${LLM_API_KEY}"
   },
   "fetch_max_papers": 10,
@@ -176,6 +175,7 @@ output = bash("""python skills/screening/screen_papers.py \
   "maxOutputLength": 102400,
   "context_budget_total": 200000,
   "context_budget_reserved": 4000,
+  "context_max_chars": 200000,
   "topics": [
     {
       "name": "Computer_Vision",
@@ -208,13 +208,14 @@ output = bash("""python skills/screening/screen_papers.py \
 ### 阈值配置说明
 
 
-| 阈值项                     | 说明             | 默认值    |
-| ----------------------- | -------------- | ------ |
-| max_depth               | 最大递归深度         | 4      |
-| max_retry               | 最大重试次数         | 3      |
-| maxOutputLength         | 输出最大长度         | 102400 |
-| context_budget_total    | 上下文总 token 预算  | 200000 |
-| context_budget_reserved | 保留给输出的 token 数 | 4000   |
+| 阈值项                     | 说明                 | 默认值    |
+| ----------------------- | ------------------ | ------ |
+| max_depth               | 最大递归深度             | 4      |
+| max_retry               | 最大重试次数             | 3      |
+| maxOutputLength         | 输出最大长度             | 102400 |
+| context_budget_total    | 上下文总 token 预算      | 200000 |
+| context_budget_reserved | 保留给输出的 token 数     | 4000   |
+| context_max_chars       | context.md 文件最大字符数 | 800000 |
 
 
 ## 设计原则

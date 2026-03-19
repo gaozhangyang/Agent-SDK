@@ -13,6 +13,7 @@ DEFAULT_PERMISSIONS: Dict[str, Any] = {
     "bash": {"network": False, "delete": False},
     "max_output_length": 102400,
     "context_budget": {"total": 200000, "reservedOutput": 4000},
+    "context_max_chars": 800000,
 }
 
 
@@ -23,6 +24,7 @@ def load_permissions(goal_dir: str) -> Tuple[Dict[str, Any], str]:
     返回: (permissions_dict, permissions_dir)
     """
     current = os.path.abspath(goal_dir)
+    start = current
 
     while True:
         perm_path = os.path.join(current, "permissions.json")
@@ -31,9 +33,11 @@ def load_permissions(goal_dir: str) -> Tuple[Dict[str, Any], str]:
                 node_permissions = json.load(f)
             merged = DEFAULT_PERMISSIONS.copy()
             merged.update(node_permissions)
+            if "bash" in node_permissions:
+                merged["bash"] = {**DEFAULT_PERMISSIONS["bash"], **node_permissions["bash"]}
             return merged, current
 
         parent = os.path.dirname(current)
         if parent == current:
-            return DEFAULT_PERMISSIONS.copy(), current
+            return DEFAULT_PERMISSIONS.copy(), start
         current = parent

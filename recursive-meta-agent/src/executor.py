@@ -1,336 +1,199 @@
 """
-执行器：execute_with_verification() 和 execute_decompose()
+执行器：direct/decompose/finalize。
 """
 
+from __future__ import annotations
+
+import hashlib
+import json
 import os
 import re
-import json
 import subprocess
 import sys
-import hashlib
-from typing import Dict, Any, List, Optional
 from datetime import datetime
+from typing import Any, Dict, List, Optional
 
-from logger import get_logger
-from primitives import make_primitives
-from deps import validate_dependencies, get_execution_levels, ValidationError
+from agent_config import load_agent_config
+from deps import get_execution_levels, validate_dependencies
+from primitives import MAX_RETRY, make_primitives
 from prompts import get_code_generator_prompt, get_observer_prompt
 
 
-# 子进程执行 script 时的默认超时（秒）
 SCRIPT_RUN_TIMEOUT = int(os.environ.get("SCRIPT_RUN_TIMEOUT", "600"))
 
 
-# ---------------------------------------------------------------------------
-# 子任务名称工具
-# ---------------------------------------------------------------------------
-
-
 def sanitize_subtask_name(name: str) -> str:
-    """
-    清理 subtask 名称，确保可以作为有效目录名。
-    只允许字母、数字、下划线、连字符以及 Unicode 字符（如中文）。
-    """
     if not name:
         return f"subtask_{hashlib.md5(str(datetime.now()).encode()).hexdigest()[:8]}"
-
     name = str(name).strip().replace(" ", "_")
     name = re.sub(r'[\\/:*"<>|]', "", name)
     name = re.sub(r"^[_\-]+|[_\-]+$", "", name, flags=re.ASCII)
-
     if not name or not re.search(r"[a-zA-Z0-9_\-\u4e00-\u9fff]", name):
         name = f"subtask_{hashlib.md5(name.encode()).hexdigest()[:8]}"
-
     return name[:64]
 
 
-def _resolve_indirect_paths(paths: List[str], base_dir: str) -> List[str]:
-    """
-    将相对路径转换为以 base_dir 为基准的绝对路径。
-    """
-    resolved = []
-    for p in paths:
-        if isinstance(p, str) and p.strip():
-            if os.path.isabs(p):
-                resolved.append(os.path.normpath(p))
-            else:
-                resolved.append(os.path.normpath(os.path.join(base_dir, p)))
-    return resolved
-
-
-# ---------------------------------------------------------------------------
-# script 解析工具
-# ---------------------------------------------------------------------------
-
-
-def _strip_tool_markup(text: str) -> str:
-    """去除模型误输出的 tool 标记"""
-    text = re.sub(r"<tool_code>.*?</tool_code>", "", text, flags=re.DOTALL)
-    text = re.sub(r"<tool\s+name=[^>]*>.*?</tool>", "", text, flags=re.DOTALL)
-    return text
-
-
-def parse_script(script_content: str) -> tuple:
-    """
-    从 LLM 输出中解析 script。
-    返回: script
-    """
-    script_content = _strip_tool_markup(script_content)
-
-    script = ""
-    for pattern in [r"```python\n(.*?)\n```", r"```script\n(.*?)\n```"]:
-        m = re.search(pattern, script_content, re.DOTALL)
-        if m:
-            script = m.group(1).strip()
-            break
-
-    return script
-
-
-# ---------------------------------------------------------------------------
-# observer 解析工具
-# ---------------------------------------------------------------------------
+def parse_script(script_content: str) -> str:
+    cleaned = re.sub(r"<tool_code>.*?</tool_code>", "", script_content, flags=re.DOTALL)
+    cleaned = re.sub(r"<tool\s+name=[^>]*>.*?</tool>", "", cleaned, flags=re.DOTALL)
+    for pattern in (r"```python\n(.*?)\n```", r"```script\n(.*?)\n```"):
+        match = re.search(pattern, cleaned, re.DOTALL)
+        if match:
+            return match.group(1).strip()
+    return cleaned.strip()
 
 
 def parse_observer_response(llm_output: str) -> dict:
-    """
-    解析 observer LLM 的输出。
-    新格式: {"direct_info": str, "indirect_files": list}
-    """
-    import re
-
-    # 清理 markdown 代码块
     cleaned = llm_output.strip()
     if cleaned.startswith("```"):
         cleaned = cleaned[7:] if cleaned.lower().startswith("```json") else cleaned[3:]
-        if cleaned.rstrip().endswith("```"):
-            cleaned = cleaned.rstrip()[:-3]
+        cleaned = cleaned.rstrip()
+        if cleaned.endswith("```"):
+            cleaned = cleaned[:-3]
         cleaned = cleaned.strip()
 
-    # 尝试解析清理后的 JSON
-    try:
-        result = json.loads(cleaned)
-        if isinstance(result, dict):
-            return {
-                "direct_info": result.get("direct_info", ""),
-                "indirect_files": result.get("indirect_files", []),
-            }
-    except json.JSONDecodeError:
-        pass
-
-    # fallback：从原始输出中提取 JSON
-    json_match = re.search(r"\{[\s\S]*\}", llm_output)
-    if json_match:
+    for payload in (cleaned, _extract_json_object(llm_output)):
+        if not payload:
+            continue
         try:
-            result = json.loads(json_match.group())
-            if isinstance(result, dict):
+            parsed = json.loads(payload)
+            if isinstance(parsed, dict):
                 return {
-                    "direct_info": result.get("direct_info", ""),
-                    "indirect_files": result.get("indirect_files", []),
+                    "status": parsed.get("status", "partial"),
+                    "summary": parsed.get("summary", ""),
+                    "direct_info": parsed.get("direct_info", ""),
+                    "indirect_files": parsed.get("indirect_files", []),
+                    "open_questions": parsed.get("open_questions", []),
+                    "recommended_next_action": parsed.get(
+                        "recommended_next_action", "finish"
+                    ),
                 }
         except json.JSONDecodeError:
-            pass
+            continue
 
     return {
-        "direct_info": llm_output,  # 如果解析失败，把原始输出当作直接信息
+        "status": "partial",
+        "summary": "",
+        "direct_info": llm_output,
         "indirect_files": [],
+        "open_questions": [],
+        "recommended_next_action": "finish",
     }
 
 
-# ---------------------------------------------------------------------------
-# script 执行
-# ---------------------------------------------------------------------------
-
-
 def execute_script(goal_dir: str, permissions: dict, logger) -> str:
-    """
-    在子进程中执行 script.py，隔离崩溃。
-    返回完整的 stdout+stderr 控制台输出。
-    """
     script_path = os.path.join(goal_dir, "script.py")
     if not os.path.exists(script_path):
         raise FileNotFoundError(f"Script not found: {script_path}")
 
-    src_dir = os.path.dirname(os.path.abspath(__file__))
-    runner = os.path.join(src_dir, "script_runner.py")
+    runner = os.path.join(os.path.dirname(os.path.abspath(__file__)), "script_runner.py")
     goal_dir_abs = os.path.abspath(goal_dir)
 
-    # 供子进程读取 permissions
-    perm_path = os.path.join(goal_dir_abs, ".executor_permissions.json")
-    try:
-        with open(perm_path, "w", encoding="utf-8") as f:
-            json.dump(permissions or {}, f, indent=2, ensure_ascii=False)
-    except OSError:
-        pass
-
-    try:
-        result = subprocess.run(
-            [sys.executable, runner, goal_dir_abs],
-            cwd=src_dir,
-            capture_output=True,
-            text=True,
-            timeout=SCRIPT_RUN_TIMEOUT,
-            env=os.environ.copy(),
-        )
-    except subprocess.TimeoutExpired as e:
-        out = (e.stdout or b"").decode("utf-8", errors="replace") + (
-            e.stderr or b""
-        ).decode("utf-8", errors="replace")
-        err_msg = f"Script timed out after {SCRIPT_RUN_TIMEOUT}s"
-        raise RuntimeError(err_msg) from e
+    result = subprocess.run(
+        [sys.executable, runner, goal_dir_abs],
+        cwd=os.path.dirname(runner),
+        capture_output=True,
+        text=True,
+        timeout=SCRIPT_RUN_TIMEOUT,
+        env=os.environ.copy(),
+    )
 
     console_output = result.stdout + ("\n" + result.stderr if result.stderr else "")
-
     if result.returncode != 0:
         raise RuntimeError(
-            f"Script exited with code {result.returncode}. Console output: {console_output[:500]}"
+            f"Script exited with code {result.returncode}. Console output: {console_output[:2000]}"
         )
-
     return console_output
-
-
-# ---------------------------------------------------------------------------
-# 核心执行：直接执行模式
-# ---------------------------------------------------------------------------
 
 
 def execute_with_verification(
     goal_dir: str, goal: str, context: str, permissions: dict, logger, depth: int = 0
 ) -> dict:
-    """
-    直接执行模式。
-    - 执行一次 script
-    - 调用 observer 提取 direct_info 和 indirect_files
-    - 返回包含提取信息的字典
-    """
     primitives = make_primitives(goal_dir, permissions, logger)
     llm_call = primitives["llm_call"]
-
-    # 生成 script
     code_gen_template = get_code_generator_prompt()
-    prompt = code_gen_template.format(
-        current_goal=goal,
-        goal_dir=goal_dir,
-    )
-
-    script_content = llm_call(
-        context=context,
-        prompt=prompt,
-        role="coder",
-    )
-
-    script = parse_script(script_content)
-
-    # 写入 script.py
-    script_path = os.path.join(goal_dir, "script.py")
-    with open(script_path, "w", encoding="utf-8") as f:
-        f.write(script)
-
-    # 执行 script
-    observation = ""
-    try:
-        console_output = execute_script(goal_dir, permissions, logger)
-        observation = console_output
-    except Exception as e:
-        observation = f"Execution failed: {type(e).__name__}: {e}"
-
-    # 提取信息（不再做 pass/fail 判断）
     observer_template = get_observer_prompt()
-    observer_prompt = observer_template.format(
-        goal=goal,
-        script=script,
-        observation=observation,
-    )
 
-    observer_response = llm_call(
-        context=context,
-        prompt=observer_prompt,
-        role="observer",
-    )
+    last_error = ""
+    attempts: List[Dict[str, Any]] = []
+    max_attempts = max(1, min(MAX_RETRY, 3))
 
-    verification = parse_observer_response(observer_response)
-    raw_indirect = verification.get("indirect_files", [])
+    for attempt in range(1, max_attempts + 1):
+        prompt = code_gen_template.format(
+            current_goal=goal,
+            goal_dir=goal_dir,
+            attempt=attempt,
+            previous_error=last_error or "None",
+        )
+        script_content = llm_call(context=context, prompt=prompt, role="coder")
+        script = parse_script(script_content)
+        if not script:
+            last_error = "Code generator returned an empty script."
+            attempts.append({"attempt": attempt, "status": "failed", "error": last_error})
+            continue
 
-    # 将相对路径转为以 goal_dir 为基准的绝对路径
-    indirect_files_abs = _resolve_indirect_paths(raw_indirect, goal_dir)
+        script_path = os.path.join(goal_dir, "script.py")
+        with open(script_path, "w", encoding="utf-8") as f:
+            f.write(script)
 
-    # 返回包含直接信息和间接文件的信息字典
+        try:
+            observation = execute_script(goal_dir, permissions, logger)
+        except Exception as exc:
+            observation = f"Execution failed: {type(exc).__name__}: {exc}"
+
+        observer_prompt = observer_template.format(
+            goal=goal,
+            script=script,
+            observation=observation,
+        )
+        observer_response = llm_call(
+            context=context,
+            prompt=observer_prompt,
+            role="observer",
+        )
+        verification = parse_observer_response(observer_response)
+        direct_info = verification.get("direct_info", "")
+        status = verification.get("status", "partial")
+
+        attempt_record = {
+            "attempt": attempt,
+            "status": status,
+            "summary": verification.get("summary", ""),
+            "observation": observation,
+        }
+        attempts.append(attempt_record)
+
+        if status == "success":
+            return {
+                "observation": observation,
+                "summary": verification.get("summary", "") or _make_summary(observation),
+                "status": "success",
+                "direct_info": direct_info,
+                "indirect_files": _resolve_indirect_paths(
+                    verification.get("indirect_files", []), goal_dir
+                ),
+                "open_questions": verification.get("open_questions", []),
+                "recommended_next_action": verification.get(
+                    "recommended_next_action", "finish"
+                ),
+                "retries": attempt - 1,
+                "attempts": attempts,
+            }
+
+        last_error = direct_info or observation
+
+    final_observation = attempts[-1]["observation"] if attempts else last_error
     return {
-        "observation": observation,
-        "direct_info": verification.get("direct_info", ""),
-        "indirect_files": indirect_files_abs,
+        "observation": final_observation,
+        "summary": _make_summary(final_observation),
+        "status": "failed",
+        "direct_info": last_error or final_observation,
+        "indirect_files": [],
+        "open_questions": ["Execution did not reach a success state."],
+        "recommended_next_action": "decompose",
+        "retries": max(0, len(attempts) - 1),
+        "attempts": attempts,
     }
-
-
-def write_results(goal_dir: str, observation: str) -> None:
-    """根节点写入 results.md"""
-    results_path = os.path.join(goal_dir, "results.md")
-    with open(results_path, "w", encoding="utf-8") as f:
-        f.write(f"# Result\n\n{observation}")
-
-
-def append_to_parent_context(
-    parent_dir: str,
-    subtask_name: str,
-    direct_info: str,
-    indirect_files: Optional[List[str]] = None,
-) -> None:
-    """
-    把子节点的直接信息和间接文件追加到父节点的 context.md。
-    按子任务名称加标题追加，保持信息完整性。
-    写入前逐行去重，避免冗余信息累积。
-
-    Args:
-        parent_dir: 父节点目录
-        subtask_name: 子任务名称
-        direct_info: observer 提取的直接信息
-        indirect_files: observer 识别的间接文件路径列表
-    """
-    context_path = os.path.join(parent_dir, "context.md")
-
-    if not direct_info and not indirect_files:
-        return
-
-    # 读取已有 context，逐行去重
-    existing_lines: set = set()
-    if os.path.exists(context_path):
-        with open(context_path, "r", encoding="utf-8") as f:
-            for line in f:
-                stripped = line.strip()
-                if stripped:
-                    existing_lines.add(stripped)
-
-    # 构建新内容
-    new_lines = []
-
-    # 写入直接信息，去除已存在的行
-    if direct_info:
-        for line in direct_info.splitlines():
-            stripped = line.strip()
-            if stripped and stripped not in existing_lines:
-                new_lines.append(line)
-                existing_lines.add(stripped)  # 防止同一段落内重复
-
-    # 写入间接文件的 <<read>> 块
-    if indirect_files:
-        for file_path in indirect_files:
-            read_block = f"<<read>> {file_path} <<read/>>"
-            if read_block not in existing_lines:
-                new_lines.append(read_block)
-                existing_lines.add(read_block)
-
-    if not new_lines:
-        return
-
-    with open(context_path, "a", encoding="utf-8") as f:
-        f.write(f"\n\n# From: {subtask_name}\n")
-        for line in new_lines:
-            f.write(line + "\n")
-
-
-# ---------------------------------------------------------------------------
-# 分解执行
-# ---------------------------------------------------------------------------
 
 
 def execute_decompose(
@@ -340,46 +203,197 @@ def execute_decompose(
     depth: int,
     permissions: dict,
     logger,
-) -> None:
-    """
-    分解执行模式：
-    1. 创建子节点目录（带数字前缀），写 goal.md
-    2. 拓扑排序，分层串行执行
-    3. 每个子节点完成后，立即把 observation 追加到父节点 context.md
-    """
+) -> List[Dict[str, Any]]:
     from agent import meta_agent
 
-    # 生成子任务名（带数字前缀）并更新 depends_on
     name_mapping: Dict[str, str] = {}
     for idx, subtask in enumerate(subtasks, start=1):
-        original = subtask.get("name", "")
+        original = subtask.get("name", f"subtask_{idx}")
         prefixed = f"{idx}_{sanitize_subtask_name(original)}"
         name_mapping[original] = prefixed
         subtask["name"] = prefixed
 
     for subtask in subtasks:
-        if "depends_on" in subtask:
-            subtask["depends_on"] = [
-                name_mapping.get(dep, dep) for dep in subtask["depends_on"]
-            ]
+        subtask["depends_on"] = [
+            name_mapping.get(dep, dep) for dep in subtask.get("depends_on", [])
+        ]
 
-    # 依赖校验
     validated_tasks = validate_dependencies(subtasks)
-
-    # 创建子节点目录
-    for subtask in validated_tasks:
-        subdir = os.path.join(goal_dir, subtask["name"])
+    for task in validated_tasks:
+        subdir = os.path.join(goal_dir, task["name"])
         os.makedirs(subdir, exist_ok=True)
-
         with open(os.path.join(subdir, "goal.md"), "w", encoding="utf-8") as f:
-            f.write(subtask["description"])
+            f.write(task["description"])
 
-    # 按拓扑序逐层执行
-    levels = get_execution_levels(validated_tasks)
-
-    for level_tasks in levels:
-        for task_idx, task in enumerate(level_tasks):
+    child_artifacts = []
+    for level_tasks in get_execution_levels(validated_tasks):
+        for index, task in enumerate(level_tasks, start=1):
             subdir = os.path.join(goal_dir, task["name"])
-            # 子任务执行后，其 observation 会在 meta_agent 末尾写入父节点 context.md
-            # 无需在此处额外调用 append_to_parent_context
-            meta_agent(subdir, depth + 1, display_index=task_idx + 1)
+            child_artifact = meta_agent(subdir, depth + 1, display_index=index)
+            child_artifacts.append(child_artifact)
+    return child_artifacts
+
+
+def write_results(goal_dir: str, artifact: Dict[str, Any]) -> None:
+    results_path = os.path.join(goal_dir, "results.md")
+    lines = [
+        "# Result",
+        "",
+        f"- status: {artifact.get('status', 'unknown')}",
+        f"- mode: {artifact.get('mode', 'unknown')}",
+        "",
+        artifact.get("summary", "").strip() or "No summary available.",
+    ]
+
+    child_summaries = artifact.get("child_summaries", [])
+    if child_summaries:
+        lines.extend(["", "## Child Summaries"])
+        for child in child_summaries:
+            lines.append(
+                f"- {child.get('name', 'unknown')}: {child.get('status', 'unknown')} | {child.get('summary', '')}"
+            )
+
+    direct_info = artifact.get("direct_info", "").strip()
+    if direct_info:
+        lines.extend(["", "## Direct Info", "", direct_info])
+
+    with open(results_path, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines).strip() + "\n")
+
+
+def append_to_parent_context(
+    parent_dir: str,
+    subtask_name: str,
+    artifact: Dict[str, Any],
+    permissions: Optional[Dict[str, Any]] = None,
+) -> None:
+    permissions = permissions or {}
+    context_path = os.path.join(parent_dir, "context.md")
+
+    summary = artifact.get("summary", "").strip()
+    direct_info = artifact.get("direct_info", "").strip()
+    indirect_files = artifact.get("indirect_files", []) or []
+    open_questions = artifact.get("open_questions", []) or []
+    if not any((summary, direct_info, indirect_files, open_questions)):
+        return
+
+    block_lines = [
+        "",
+        "---",
+        "",
+        f"# From: {subtask_name}",
+        f"status: {artifact.get('status', 'unknown')}",
+        f"mode: {artifact.get('mode', 'unknown')}",
+    ]
+    if summary:
+        block_lines.extend(["summary:", summary])
+    if direct_info:
+        block_lines.extend(["direct_info:", direct_info])
+    if open_questions:
+        block_lines.append("open_questions:")
+        block_lines.extend(f"- {item}" for item in open_questions)
+    if indirect_files:
+        block_lines.append("indirect_files:")
+        block_lines.extend(f"<<read>> {path} <<read/>>" for path in indirect_files)
+
+    new_content = "\n".join(block_lines) + "\n"
+    max_chars = int(
+        load_agent_config(parent_dir).get(
+            "context_max_chars", permissions.get("context_max_chars", 800000)
+        )
+    )
+
+    existing = ""
+    if os.path.exists(context_path):
+        with open(context_path, "r", encoding="utf-8") as f:
+            existing = f.read()
+
+    combined = existing + new_content
+    if len(combined) > max_chars:
+        trimmed = combined[-max_chars:]
+        combined = "[Context tail retained due to character limit]\n\n" + trimmed
+
+    with open(context_path, "w", encoding="utf-8") as f:
+        f.write(combined)
+
+
+def write_artifact(goal_dir: str, artifact: Dict[str, Any]) -> None:
+    with open(os.path.join(goal_dir, "artifact.json"), "w", encoding="utf-8") as f:
+        json.dump(artifact, f, indent=2, ensure_ascii=False)
+
+
+def build_direct_artifact(goal_dir: str, goal: str, result: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "node": os.path.basename(goal_dir),
+        "goal": goal,
+        "mode": "direct",
+        "status": result.get("status", "failed"),
+        "summary": result.get("summary", ""),
+        "observation": result.get("observation", ""),
+        "direct_info": result.get("direct_info", ""),
+        "indirect_files": result.get("indirect_files", []),
+        "open_questions": result.get("open_questions", []),
+        "recommended_next_action": result.get("recommended_next_action", "finish"),
+        "retries": result.get("retries", 0),
+        "attempts": result.get("attempts", []),
+    }
+
+
+def build_decompose_artifact(
+    goal_dir: str, goal: str, child_artifacts: List[Dict[str, Any]]
+) -> Dict[str, Any]:
+    status = "success" if child_artifacts and all(
+        child.get("status") == "success" for child in child_artifacts
+    ) else "partial"
+    if child_artifacts and any(child.get("status") == "failed" for child in child_artifacts):
+        status = "failed"
+
+    summary_parts = [
+        f"{child.get('node', 'unknown')}: {child.get('status', 'unknown')} - {child.get('summary', '').strip()}"
+        for child in child_artifacts
+    ]
+    return {
+        "node": os.path.basename(goal_dir),
+        "goal": goal,
+        "mode": "decompose",
+        "status": status,
+        "summary": "\n".join(summary_parts) if summary_parts else "No child tasks were generated.",
+        "direct_info": "",
+        "indirect_files": [],
+        "open_questions": [],
+        "recommended_next_action": "finish" if status == "success" else "direct_retry",
+        "children": [
+            os.path.join(goal_dir, child.get("node", "")) for child in child_artifacts
+        ],
+        "child_summaries": [
+            {
+                "name": child.get("node", "unknown"),
+                "status": child.get("status", "unknown"),
+                "summary": child.get("summary", ""),
+            }
+            for child in child_artifacts
+        ],
+    }
+
+
+def _resolve_indirect_paths(paths: List[str], base_dir: str) -> List[str]:
+    resolved = []
+    for path in paths:
+        if not isinstance(path, str) or not path.strip():
+            continue
+        resolved.append(
+            os.path.normpath(path if os.path.isabs(path) else os.path.join(base_dir, path))
+        )
+    return resolved
+
+
+def _extract_json_object(text: str) -> str:
+    match = re.search(r"\{[\s\S]*\}", text)
+    return match.group(0) if match else ""
+
+
+def _make_summary(observation: str) -> str:
+    stripped = observation.strip()
+    if not stripped:
+        return "No observation produced."
+    return stripped[:500]

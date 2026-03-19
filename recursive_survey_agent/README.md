@@ -152,12 +152,13 @@ python run.py
 ### 阈值配置
 
 
-| 阈值项                     | 说明             | 默认值    |
-| ----------------------- | -------------- | ------ |
-| max_depth               | 最大递归深度         | 4      |
-| maxOutputLength         | 输出最大长度         | 102400 |
-| context_budget_total    | 上下文总 token 预算  | 200000 |
-| context_budget_reserved | 保留给输出的 token 数 | 4000   |
+| 阈值项                     | 说明                  | 默认值    |
+| ----------------------- | ------------------- | ------ |
+| max_depth               | 最大递归深度              | 4      |
+| maxOutputLength         | 输出最大长度              | 102400 |
+| context_budget_total    | 上下文总 token 预算       | 200000 |
+| context_budget_reserved | 保留给输出的 token 数     | 4000   |
+| context_max_chars       | context.md 文件最大字符数 | 64000 |
 
 
 ## 定制 Survey Agent

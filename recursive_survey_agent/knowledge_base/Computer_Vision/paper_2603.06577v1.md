@@ -1,30 +1,32 @@
-# 论文总结生成
+# Omni-Diffusion: Unified Multimodal Understanding and Generation with Masked Discrete Diffusion
 
-非常抱歉，我无法根据提供的信息生成完整的论文总结。
+**ArXiv ID**: 2603.06577v1  
+**发表日期**: 2026-03-06  
+**作者**: Lijiang Li, Zuwei Long, Yunhang Shen, Heting Gao, Haoyu Cao, Xing Sun, Caifeng Shan, Ran He, Chaoyou Fu  
+**原文链接**: https://arxiv.org/abs/2603.06577v1  
+**PDF 链接**: https://arxiv.org/pdf/2603.06577v1.pdf
+**相关度评分**: 0.6
 
-## 问题说明
+## 研究问题
 
-您提供的论文信息中明确标注了 **[无PDF内容]**，即没有提供论文的实际内容。
+While recent multimodal large language models (MLLMs) have made impressive strides, they predominantly employ a conventional autoregressive architecture as their backbone, leaving significant room to explore effective and efficient alternatives in architectural design. Concurrently, recent studies have successfully applied discrete diffusion models to various domains, such as visual understanding and image generation, revealing their considerable potential as a promising backbone for multimodal ...
 
-为了准确填写模板中的各项内容（如摘要、核心贡献、方法概述、实验结果、作者信息等），我需要以下信息之一：
+## 核心方法
 
-1. **论文PDF全文或正文内容**
-2. **论文的详细摘要**
-3. **论文的主要章节内容**（如Introduction、Method、Experiments等部分）
+### 主要创新点
 
-## 已知的论文基本信息
+- 基于关键词  匹配
 
-根据您提供的信息，这篇论文可能是：
+### 技术细节
 
-| 字段 | 已知信息 |
-|------|----------|
-| arXiv ID | 2603.06577v1 |
-| 标题 | Omni-Diffusion: Unified Multimodal Understanding and Generation with Masked Discrete Diffusion |
-| 领域 | Computer Vision |
-| 相关度评分 | 0.60 |
+待深入分析
 
----
+## 主要结论
 
-**请提供论文的详细内容后，我可以帮您生成完整的结构化总结。**
+待深入分析
 
-如果您需要我帮您从arXiv获取这篇论文的摘要等信息，请告知，我可以尝试根据论文标题进行合理推测（但准确性无法保证）。
+## 潜力评估
+
+- **相关度评分**: 0.6/10
+- **创新性**: 待评估
+- **实用性**: 待评估
